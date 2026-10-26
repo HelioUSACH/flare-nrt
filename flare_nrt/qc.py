@@ -12,10 +12,14 @@ Rules (a slot is rejected if any channel fails):
 - ``nonfinite``: more than 1 % of pixels NaN/inf.
 - ``time_offset``: T_OBS more than 90 s from the slot time.
 - ``channel_spread``: channels' T_OBS more than 120 s apart.
-- ``empty``: on-disk median <= 0 (blank readout).
-- ``median_jump``: on-disk median outside [0.25, 4]× the channel's recent
-  reference (dimming, partial readout). Loose on purpose: a flare barely
-  moves the disk median.
+- ``empty``: blank readout — no positive pixel, or zero variance.
+- ``median_jump``: on-disk median **per second of exposure** outside
+  [0.25, 4]× the channel's recent reference (dimming, partial readout).
+  Synoptic images are in DN, not DN/s, and AIA's automatic exposure control
+  shortens exposures during flares (131 Å drops to a few % of its normal
+  value), so raw counts can't be compared across frames — and a short
+  exposure can leave the raw disk median at 0, which is why ``empty`` is
+  not a median test. Loose on purpose: a flare barely moves the disk median.
 """
 
 from __future__ import annotations
@@ -122,11 +126,13 @@ class QualityControl:
                 times.append(t)
                 if abs((t - slot).total_seconds()) > MAX_TIME_OFFSET_S:
                     res.reasons.append(f"time_offset:{wave}")
-            med = disk_median(d, h)
-            medians[wave] = med
-            if med <= 0:
+            finite = d[np.isfinite(d)]
+            if finite.size == 0 or not (finite > 0).any() or float(finite.std()) == 0.0:
                 res.reasons.append(f"empty:{wave}")
-            else:
+            exptime = float(h.get("EXPTIME", 0) or 0)
+            med = disk_median(d, h) / exptime if exptime > 0 else 0.0
+            medians[wave] = med
+            if med > 0:
                 ref = self.ref.get(wave)
                 if ref and len(ref) >= 5:
                     r = med / float(np.median(ref))

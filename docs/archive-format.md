@@ -31,7 +31,9 @@ filesystem, so curation costs no extra space until staging is pruned.
 1. **Per frame (loop, `qc.py`)**: a slot is rejected if any channel is
    unreadable, has QUALITY ≠ 0, EXPTIME ≤ 0, the wrong WAVELNTH, > 1 %
    non-finite pixels, T_OBS > 90 s from the slot, channels > 120 s apart,
-   an empty disk, or a disk median outside [0.25, 4]× its recent reference.
+   a blank readout, or a disk median per second of exposure outside
+   [0.25, 4]× its recent reference (AIA shortens exposures during flares,
+   so raw counts are never compared).
    Rejected slots are never used as baselines either. The reason codes are
    stored (`qc` in results and frames.csv).
 2. **What is kept (curate)**: complete 4-channel slots inside

@@ -52,3 +52,33 @@ def test_median_jump_against_recent_reference(tmp_path):
         h[1].data = h[1].data * 10
     q = qc.check_slot(s, paths)
     assert "median_jump:1600" in q.reasons
+
+
+def test_short_exposure_during_flare_is_not_rejected(tmp_path):
+    """AIA's exposure control: 131 Å at 2 % of its usual exposure, counts
+    scaled the same way (raw disk median rounds to ~0). Must pass."""
+    qc = QualityControl()
+    for i in range(6):
+        s = T0 + dt.timedelta(minutes=2 * i)
+        assert qc.check_slot(s, _slot(tmp_path / str(i), s)).ok
+    s = T0 + dt.timedelta(minutes=12)
+    paths = _slot(tmp_path / "flare", s)
+    from astropy.io import fits
+    with fits.open(paths[131], mode="update") as h:
+        h[1].data = h[1].data * 0.02
+        h[1].header["EXPTIME"] = 2.9 * 0.02
+    q = qc.check_slot(s, paths)
+    assert q.ok, q.reasons
+
+
+def test_raw_dimming_at_constant_exposure_is_still_caught(tmp_path):
+    qc = QualityControl()
+    for i in range(6):
+        s = T0 + dt.timedelta(minutes=2 * i)
+        assert qc.check_slot(s, _slot(tmp_path / str(i), s)).ok
+    s = T0 + dt.timedelta(minutes=12)
+    paths = _slot(tmp_path / "dim", s)
+    from astropy.io import fits
+    with fits.open(paths[171], mode="update") as h:
+        h[1].data = h[1].data * 0.05
+    assert "median_jump:171" in qc.check_slot(s, paths).reasons
