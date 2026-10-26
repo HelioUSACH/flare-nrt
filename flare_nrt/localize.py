@@ -1,8 +1,12 @@
 """Where on the disk the change is (experimental — not validated against
 flare catalogues yet, docs/model-card.md).
 
-The brightest connected region of the 131 Å difference channel, in
-helioprojective arcsec computed from the 1024² synoptic header. Array row 0
+The brightest connected region of the 131 Å difference **in DN/s**
+(current/EXPTIME − mean of the baselines/EXPTIME, on the 512 grid), in
+helioprojective arcsec computed from the synoptic header. Not the model's
+difference channel: that one is in raw DN, and AIA's exposure control cuts
+131 Å exposures during flares, so the raw difference is often negative right
+where the flare is. Array row 0
 is the first FITS row, i.e. the *south* edge for a north-up image: y grows
 with the row index (the v3 pipeline's localiser appears to have had y flipped;
 this module is written from the FITS convention instead)."""
@@ -13,12 +17,20 @@ import numpy as np
 import torch
 from scipy import ndimage
 
-DIFF_131 = 4  # channel index of 131 Å difference in the 8-ch tensor
+
+def rate_map(data: np.ndarray, header: dict) -> np.ndarray:
+    """131 Å image in DN/s on the 512 grid (same resampling as the model)."""
+    from .preprocess import resize_512
+
+    exptime = float(header.get("EXPTIME", 0) or 0)
+    img = np.clip(np.nan_to_num(data, nan=0.0), 0, None) / (exptime if exptime > 0 else 1.0)
+    return resize_512(img).numpy()
 
 
-def localize(x: torch.Tensor, header: dict, src_size: int | None = None) -> dict | None:
+def localize(diff: np.ndarray | torch.Tensor, header: dict, src_size: int | None = None) -> dict | None:
+    """``diff``: 2-D difference map on the 512 grid (DN/s)."""
     src_size = int(src_size or header.get("NAXIS1") or 1024)
-    d = x[DIFF_131].float().numpy()
+    d = diff.float().numpy() if isinstance(diff, torch.Tensor) else np.asarray(diff, dtype=np.float32)
     d = ndimage.gaussian_filter(d, 2.0)
     peak = float(d.max())
     if peak <= 0:
@@ -50,6 +62,6 @@ def localize(x: torch.Tensor, header: dict, src_size: int | None = None) -> dict
         "area_px": area_px,
         "area_arcsec2": round(area_px * (cdelt1 * scale) * (cdelt2 * scale), 1),
         "on_limb": bool(rad > 0.9 * rsun),
-        "method": "diff131_brightest_region",
+        "method": "diff131_rate_brightest_region",
         "confidence": "experimental",
     }

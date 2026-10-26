@@ -25,7 +25,7 @@ from . import __version__
 from .config import Settings
 from .detector import EventTracker, FrameBuffer, baseline_slots, is_alert
 from .grid import CADENCE, CHANNELS, floor_slot, iso, parse_iso, utcnow
-from .localize import localize
+from .localize import localize, rate_map
 from .model import Ensemble
 from .preprocess import build_current, build_input, load_norm_stats
 from .qc import QualityControl
@@ -54,6 +54,7 @@ class Processor:
         self.qc_reasons: dict = {}
         self.headers: dict = {}
         self.inputs: dict = {}
+        self.rate131: dict = {}
         st = read_json(cfg.loop_state_path, {}) or {}
         self.tracker = EventTracker(cfg.merge_gap_min, st.get("last_id", 0), st.get("current"))
         self.results = ResultStore(cfg.results_dir)
@@ -77,8 +78,9 @@ class Processor:
         t = build_current({w: q.frames[w].data for w in CHANNELS}, self.v_high)
         self.headers[slot] = q.frames[131].header
         self.inputs[slot] = q.t_obs
+        self.rate131[slot] = rate_map(q.frames[131].data, q.frames[131].header)
         self.buf.put(slot, t)
-        for d in (self.headers, self.inputs, self.qc_reasons):
+        for d in (self.headers, self.inputs, self.qc_reasons, self.rate131):
             for s in [s for s in d if s not in self.buf]:
                 del d[s]
         return t
@@ -107,7 +109,10 @@ class Processor:
                 t0 = time.perf_counter()
                 prob, scores = self.ens.predict(x)
                 alert = is_alert(prob, cfg.threshold)
-                loc = localize(x, self.headers.get(slot, {})) if alert else None
+                loc = None
+                if alert and slot in self.rate131 and all(s in self.rate131 for s in bl_slots):
+                    diff = self.rate131[slot] - sum(self.rate131[s] for s in bl_slots) / len(bl_slots)
+                    loc = localize(diff, self.headers.get(slot, {}))
                 row.update(status="ok", probability=round(prob, 6), alert=alert,
                            ensemble_scores=[round(s, 6) for s in scores],
                            ensemble_std=round(statistics.pstdev(scores), 6),
