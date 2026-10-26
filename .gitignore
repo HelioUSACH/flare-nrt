@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# never commit data, weights or outputs
+var/
+models/
+metadata/
+data/
+output*/
+logs/
+cache/
+*.pt
+*.pth
+*.fits
+*.fits.gz
+*.npz
+*.jsonl
+*.log
+*.ipynb
+.env
