@@ -9,7 +9,7 @@
 - a flare is **evaluable** if at least 2 ``ok`` slots fall in
   [tstart − 10 min, tpeak].
 
-    python -m flare_nrt.validate --start 2026-10-27 --end 2026-11-03 [--flares-csv F.csv]
+    python -m centella.validate --start 2026-10-27 --end 2026-11-03 [--flares-csv F.csv]
 """
 
 from __future__ import annotations

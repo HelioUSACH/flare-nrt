@@ -10,9 +10,9 @@ import numpy as np
 import pytest
 import torch
 
-from flare_nrt.config import Settings
-from flare_nrt.grid import CHANNELS, file_name
-from flare_nrt.model import build_member
+from centella.config import Settings
+from centella.grid import CHANNELS, file_name
+from centella.model import build_member
 
 T0 = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.UTC)
 

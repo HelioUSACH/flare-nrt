@@ -88,7 +88,7 @@ def read_csv(path: Path) -> list[Flare]:
 def fetch_swpc(url: str, timeout: float = 30) -> list[Flare]:
     import requests
 
-    r = requests.get(url, timeout=timeout, headers={"User-Agent": "flare-nrt (HelioUSACH)"})
+    r = requests.get(url, timeout=timeout, headers={"User-Agent": "Centella (HelioUSACH)"})
     r.raise_for_status()
     return parse_swpc(r.json())
 

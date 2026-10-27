@@ -1,5 +1,5 @@
-"""Settings. Every value comes from an environment variable (``FLARE_*``) with a
-default under ``FLARE_DATA_DIR``; nothing assumes a particular machine."""
+"""Settings. Every value comes from an environment variable (``CENTELLA_*``) with a
+default under ``CENTELLA_DATA_DIR``; nothing assumes a particular machine."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 def _env(name: str, default: str) -> str:
-    return os.environ.get(f"FLARE_{name}", default)
+    return os.environ.get(f"CENTELLA_{name}", default)
 
 
 @dataclass
@@ -49,11 +49,11 @@ class Settings:
     # curation
     goes_url: str = field(default_factory=lambda: _env(
         "GOES_URL", "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json"))
-    pre_flare_min: int = field(default_factory=lambda: int(_env("PRE_FLARE_MIN", "45")))
-    post_flare_min: int = field(default_factory=lambda: int(_env("POST_FLARE_MIN", "15")))
+    pre_flare_min: int = field(default_factory=lambda: int(_env("PRE_CENTELLA_MIN", "45")))
+    post_flare_min: int = field(default_factory=lambda: int(_env("POST_CENTELLA_MIN", "15")))
     neg_blocks_per_day: int = field(default_factory=lambda: int(_env("NEG_BLOCKS_PER_DAY", "4")))
     neg_block_min: int = field(default_factory=lambda: int(_env("NEG_BLOCK_MIN", "60")))
-    min_flare_class: str = field(default_factory=lambda: _env("MIN_FLARE_CLASS", "C1.0"))
+    min_flare_class: str = field(default_factory=lambda: _env("MIN_CENTELLA_CLASS", "C1.0"))
 
     host: str = field(default_factory=lambda: _env("HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: int(_env("PORT", "5050")))

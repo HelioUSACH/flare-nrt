@@ -1,8 +1,8 @@
 """The detection loop: every poll, download what JSOC has published, then
 process every slot in order, exactly once.
 
-    python -m flare_nrt.loop                 # live (systemd: deploy/flare-loop.service)
-    python -m flare_nrt.loop --replay DIR    # existing FITS, same code path
+    python -m centella.loop                 # live (systemd: deploy/centella-loop.service)
+    python -m centella.loop --replay DIR    # existing FITS, same code path
 
 Per slot: QC → preprocess → baseline from t−L…(n_baseline frames) → ensemble
 → alert rule → event merging → results/YYYYMMDD.jsonl (+ status.json for
@@ -33,7 +33,7 @@ from .retention import Retention
 from .source import LiveSource, ReplaySource
 from .store import ResultStore, append_event, read_json, write_json_atomic
 
-log = logging.getLogger("flare_nrt.loop")
+log = logging.getLogger("centella.loop")
 
 MISSING = "missing"
 
@@ -140,6 +140,7 @@ class Processor:
         open_ev = self.tracker.current
         status = {
             "status": "running",
+            "model": "Centella",
             "model_version": __version__,
             "weights_sha256": self.ens.meta.get("sha256"),
             "timestamp": row["made_at"],          # when the result was made (portal: issued)
@@ -193,7 +194,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Pr
     src = LiveSource(cfg.staging_dir, cfg.jsoc_base, cfg.lookback_min, cfg.http_timeout) if live \
         else ReplaySource(replay_dir)
     proc = Processor(cfg, ens, src, live)
-    log.info("flare-nrt %s | L=%d min, n_bl=%d, thr=%.2f, merge=%d min | %s | weights %s",
+    log.info("Centella %s | L=%d min, n_bl=%d, thr=%.2f, merge=%d min | %s | weights %s",
              __version__, cfg.lag_min, cfg.n_baseline, cfg.threshold, cfg.merge_gap_min,
              "live" if live else f"replay {replay_dir}", ens.meta["sha256"][:12])
 
@@ -240,7 +241,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Pr
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--replay", help="process existing FITS in this directory, then exit")
-    ap.add_argument("--data-dir", help="override FLARE_DATA_DIR")
+    ap.add_argument("--data-dir", help="override CENTELLA_DATA_DIR")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         stream=sys.stdout)

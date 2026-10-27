@@ -69,7 +69,7 @@ class Ensemble:
             # Older checkpoints carry numpy scalars in their metadata. Only
             # reached after the SHA-256 check above has passed.
             if not expected_sha256:
-                raise WeightsError("checkpoint needs weights_only=False; set FLARE_WEIGHTS_SHA256") from None
+                raise WeightsError("checkpoint needs weights_only=False; set CENTELLA_WEIGHTS_SHA256") from None
             ckpt = torch.load(path, map_location="cpu", weights_only=False)
         members = []
         for i, entry in enumerate(ckpt["ensemble_members"]):

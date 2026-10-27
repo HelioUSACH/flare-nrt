@@ -1,9 +1,10 @@
-# Model card: `usach.flare.nrt`
+# Model card: `usach.flare.nrt` — Centella
 
 ## Summary
 
-Near-real-time detector of M- and X-class solar flares in SDO/AIA synoptic
-images, run every 2 minutes. It reports a probability per AIA slot, an alert
+**Centella** is HelioUSACH's near-real-time detector of M- and X-class solar
+flares in SDO/AIA synoptic images, run every 2 minutes; it produces the
+`usach.flare.nrt` product. It reports a probability per AIA slot, an alert
 when it is ≥ 0.80, alerts merged into events, and an experimental location.
 Maturity: **beta**. Version 2.0.0 changes how the input is built (rolling
 baseline) and recalibrates the threshold on live data; the network weights
@@ -22,7 +23,7 @@ Ensemble of 5 ResNet-18 (8 input channels, one logit), probability = mean
 of sigmoids. Input = the 4 current channels + current − mean of the frames
 at t−8, t−10, t−12 min ("rolling baseline", L = 8 min). Preprocessing:
 bilinear 1024→512, asinh normalisation with global v_high per channel.
-Frames failing QC (`flare_nrt/qc.py`) are never used, as current or
+Frames failing QC (`centella/qc.py`) are never used, as current or
 baseline. Alerts ≤ 10 min apart are one event.
 
 ## Training data
@@ -51,7 +52,7 @@ chosen on this month, so these numbers are optimistic:
 | 10 | 0.80 | 76 % (41/54) | 100 % | 59 % | 16 | −2 min |
 
 The operational loop itself (v2.0.0, replay of the same month through
-`flare_nrt.loop`, `python -m flare_nrt.validate`) reproduces the L = 8,
+`centella.loop`, `python -m centella.validate`) reproduces the L = 8,
 0.80 row exactly: 39/54, 22/22 ≥ M2, 3 false alarms, 51 alert runs (42 on
 M/X, 6 on C).
 
@@ -64,7 +65,7 @@ start:** the median alert comes **9 min after** the GOES start and 1 min
 before the GOES peak. The model does **not** give earlier warning than
 GOES XRS. Its value is an independent, imaging-based confirmation with a
 location on the disk. Report the live numbers here weekly
-(`python -m flare_nrt.validate`).
+(`python -m centella.validate`).
 
 ## Known limitations
 
@@ -88,6 +89,6 @@ location on the disk. Report the live numbers here weekly
 
 ## Maintainers / links
 
-Producer repository `HelioUSACH/flare-nrt`; weights as a release asset with
+Producer repository `HelioUSACH/centella`; weights as a release asset with
 SHA-256; integration sheet `INTEGRATION.md`; archive format
 `docs/archive-format.md`.

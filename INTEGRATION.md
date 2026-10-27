@@ -1,18 +1,18 @@
-# Integration sheet: flare-nrt
+# Integration sheet: Centella
 
 | | |
 |---|---|
-| Model / product id | `usach.flare.nrt` |
+| Model / product id | Centella → product `usach.flare.nrt` (the product id is unchanged; Centella is the model's name) |
 | Kind | event (detection) |
 | Owner(s) | Nicolás Campos (HelioUSACH) |
-| Repo, current tag | `HelioUSACH/flare-nrt`, `v2.0.0` |
+| Repo, current tag | `HelioUSACH/centella`, `v2.0.0` |
 | Run cadence | one result per AIA synoptic slot (2 min), as soon as its 4 channels and baselines are available |
 | Inputs | AIA synoptic 131/171/304/1600 Å, `https://jsoc1.stanford.edu/data/aia/synoptic/YYYY/MM/DD/HHH00/AIAYYYYMMDD_HHMM_WWWW.fits`, 2 min, latency: measured live (`data_latency_s`), public (NASA/SDO), ≈ 2.6 GB/day. GOES flare list (labels, daily): `https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json`, public domain, < 50 kB/day |
 | New data the portal must collect | none |
 | Latest-result endpoint | `GET http://127.0.0.1:5050/api/status` (below) |
-| Freshness | computed per request: `stale` if the loop heartbeat or the last result is older than `FLARE_STALE_AFTER_SEC` (600 s, the manifest's `stale_after: 10m`), or the observation behind the last result is older than `FLARE_MAX_INPUT_AGE_SEC` (3600 s); `stale_reason` says which |
-| Resources | Measured on a 2-vCPU test machine with a same-size stand-in ensemble: **0.7 s per slot** (5 × ResNet-18, 8×512×512, 4 threads), **≈ 1 GB** peak RSS; one slot every 2 min → < 1 % of one core on average. Re-measure on the VM before go-live (`latency_ms` in `/api/status`; `systemctl status flare-loop` for memory). GPU not needed. Disk steady state ≲ 25 GB (docs/archive-format.md) |
-| Weights | release asset `deployment_ensemble_thr058.pt`, SHA-256 in the release notes and in `FLARE_WEIGHTS_SHA256` (the loop refuses a mismatch) |
+| Freshness | computed per request: `stale` if the loop heartbeat or the last result is older than `CENTELLA_STALE_AFTER_SEC` (600 s, the manifest's `stale_after: 10m`), or the observation behind the last result is older than `CENTELLA_MAX_INPUT_AGE_SEC` (3600 s); `stale_reason` says which |
+| Resources | Measured on a 2-vCPU test machine with a same-size stand-in ensemble: **0.7 s per slot** (5 × ResNet-18, 8×512×512, 4 threads), **≈ 1 GB** peak RSS; one slot every 2 min → < 1 % of one core on average. Re-measure on the VM before go-live (`latency_ms` in `/api/status`; `systemctl status centella-loop` for memory). GPU not needed. Disk steady state ≲ 25 GB (docs/archive-format.md) |
+| Weights | release asset `deployment_ensemble_thr058.pt`, SHA-256 in the release notes and in `CENTELLA_WEIGHTS_SHA256` (the loop refuses a mismatch) |
 | Baseline it must beat | GOES XRS event start (SWPC): **not beaten on timing** (median alert 9 min after it, 1 min before the peak); see the model card |
 | Known limitations | docs/model-card.md |
 | Model card | `docs/model-card.md` |
@@ -43,7 +43,7 @@ keep their names and meaning; the rest are additions.
 | `inputs` | object | | T_OBS of each channel (provider timestamps, checklist E.23) |
 | `data_latency_s` | integer | s | processing time − observation time |
 | `latency_ms` | integer | ms | inference time |
-| `model_version`, `weights_sha256` | string | | what produced the result |
+| `model`, `model_version`, `weights_sha256` | string | | what produced the result (`model` = `"Centella"`) |
 | `frame_count`, `loop_errors`, `loop_last_error`, `loop_last_error_ts` | | | loop health since start |
 | `server_time` | ISO 8601 `Z` | | |
 
@@ -60,8 +60,8 @@ data latency, free disk).
 
 ## Units
 
-`deploy/flare-loop.service` (the loop, `Restart=always`),
-`deploy/flare-api.service` (uvicorn on 127.0.0.1:5050),
-`deploy/flare-curate.{service,timer}` (04:20 UT daily),
-`deploy/flare-validate.{service,timer}` (Mondays 05:00 UT). All run as an
-unprivileged `flare` user, data under `/srv/flare-nrt`.
+`deploy/centella-loop.service` (the loop, `Restart=always`),
+`deploy/centella-api.service` (uvicorn on 127.0.0.1:5050),
+`deploy/centella-curate.{service,timer}` (04:20 UT daily),
+`deploy/centella-validate.{service,timer}` (Mondays 05:00 UT). All run as an
+unprivileged `flare` user, data under `/srv/centella`.

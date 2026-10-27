@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from flare_nrt.model import Ensemble, WeightsError, clean_keys, sha256
+from centella.model import Ensemble, WeightsError, clean_keys, sha256
 
 
 def test_clean_keys_maps_training_head():

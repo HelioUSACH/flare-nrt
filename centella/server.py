@@ -1,7 +1,7 @@
 """HTTP contract read by the portal (clima-espacial ``modules/flare/``).
 Listens on 127.0.0.1 only; no authentication from localhost.
 
-    uvicorn flare_nrt.server:app --host 127.0.0.1 --port 5050
+    uvicorn centella.server:app --host 127.0.0.1 --port 5050
 
 ``/api/status`` keeps the field names the portal's adapter reads
 (``live_status``, ``timestamp``, ``seconds_since_update``, ``probability``,
@@ -45,7 +45,7 @@ def live_status(status: dict | None, heartbeat: dict | None, now: dt.datetime, s
 
 def create_app(cfg: Settings | None = None) -> FastAPI:
     cfg = cfg or Settings()
-    app = FastAPI(title="flare-nrt", version=__version__)
+    app = FastAPI(title="Centella", version=__version__)
 
     @app.get("/api/status")
     def status():

@@ -1,5 +1,5 @@
 [project]
-name = "flare-nrt"
+name = "centella"
 version = "2.0.0"
 description = "Near-real-time solar flare detection on SDO/AIA synoptic images (HelioUSACH)"
 readme = "README.md"
@@ -20,7 +20,7 @@ dependencies = [
 dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.5"]
 
 [tool.setuptools]
-packages = ["flare_nrt"]
+packages = ["centella"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

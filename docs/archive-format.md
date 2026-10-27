@@ -1,4 +1,4 @@
-# Archive format `flare-nrt-archive/1`
+# Archive format `centella-archive/1`
 
 What the service keeps from its live input, so the model can be retrained
 and re-validated on the data it actually runs on.
@@ -21,7 +21,7 @@ JSOC ──► staging/YYYYMMDD/AIA*.fits      raw downloads, every slot     kep
 Volumes (measured on the 2026-06/07 month): raw synoptic ≈ 0.9 MB per file,
 ≈ 2.6 GB per day for 4 channels. Staging steady state ≈ 8–10 GB. Archive
 ≈ 0.4 GB (quiet day) to 1.3 GB (very active day). With the defaults the VM
-holds ≲ 25 GB; `FLARE_MIN_FREE_GB` (10 GB) is a hard floor (retention.py).
+holds ≲ 25 GB; `CENTELLA_MIN_FREE_GB` (10 GB) is a hard floor (retention.py).
 
 Archive files are hard links to the staging copy when on the same
 filesystem, so curation costs no extra space until staging is pruned.
@@ -103,6 +103,6 @@ distribution for positives and negatives.
 ## Off-VM copy
 
 The VM keeps 14 days. Pull at least weekly to the long-term host, e.g.
-`rsync -a --ignore-existing <vm>:/srv/flare-nrt/archive/ /path/to/archive/`
+`rsync -a --ignore-existing <vm>:/srv/centella/archive/ /path/to/archive/`
 and check `day.json` hashes after the copy. This is a maintainers' job
 (their backup pattern, not this repo's code).

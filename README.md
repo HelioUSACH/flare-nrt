@@ -1,4 +1,4 @@
-# flare-nrt
+# Centella
 
 Near-real-time solar flare detection on SDO/AIA synoptic images, producer
 of the `usach.flare.nrt` product of
@@ -22,25 +22,25 @@ the GitHub release of the tag you deploy, then:
 
 ```bash
 sha256sum deployment_ensemble_thr058.pt     # must match the release notes
-export FLARE_WEIGHTS=$PWD/deployment_ensemble_thr058.pt
-export FLARE_WEIGHTS_SHA256=<that hash>
-export FLARE_NORM_STATS=$PWD/global_norm_stats.json
-export FLARE_DATA_DIR=$PWD/var
+export CENTELLA_WEIGHTS=$PWD/deployment_ensemble_thr058.pt
+export CENTELLA_WEIGHTS_SHA256=<that hash>
+export CENTELLA_NORM_STATS=$PWD/global_norm_stats.json
+export CENTELLA_DATA_DIR=$PWD/var
 ```
 
 ## Run
 
 ```bash
-python -m flare_nrt.loop                       # live loop (downloads from JSOC)
-uvicorn flare_nrt.server:app --host 127.0.0.1 --port 5050
-python -m flare_nrt.curate                     # daily: archive + labels + retention
-python -m flare_nrt.validate --start 2026-10-27 --end 2026-11-02
+python -m centella.loop                       # live loop (downloads from JSOC)
+uvicorn centella.server:app --host 127.0.0.1 --port 5050
+python -m centella.curate                     # daily: archive + labels + retention
+python -m centella.validate --start 2026-10-27 --end 2026-11-02
 ```
 
 Replay existing FITS through the same code path (validation):
 
 ```bash
-python -m flare_nrt.loop --replay /path/to/fits --data-dir /tmp/replay
+python -m centella.loop --replay /path/to/fits --data-dir /tmp/replay
 ```
 
 Configuration is environment only (`.env.example`); every path is a
@@ -55,7 +55,7 @@ pytest            # offline, CPU, < 1 min; uses a tiny stand-in ensemble
 ```
 
 `tests/test_real_weights.py` checks the real weights against a stored slot
-when `FLARE_REAL_*` is set (see its docstring).
+when `CENTELLA_REAL_*` is set (see its docstring).
 
 ## Training code
 
@@ -67,7 +67,7 @@ Retraining on the archive this service builds is the next step
 ## Layout
 
 ```
-flare_nrt/  config, grid (2-min slots), source (JSOC/replay), qc, preprocess,
+centella/  config, grid (2-min slots), source (JSOC/replay), qc, preprocess,
             model (ensemble + SHA-256), detector (baseline, alert, events),
             localize, loop, store, server, curate, goes, retention, validate
 deploy/     example systemd units

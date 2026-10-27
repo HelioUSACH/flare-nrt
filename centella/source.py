@@ -23,7 +23,7 @@ class LiveSource:
         self.lookback = dt.timedelta(minutes=lookback_min)
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers["User-Agent"] = "flare-nrt (HelioUSACH)"
+        self.session.headers["User-Agent"] = "Centella (HelioUSACH)"
         self.last_download: dt.datetime | None = None
         self._missed: dict[Path, dt.datetime] = {}  # 404s: retry at most every 5 min
 

@@ -2,7 +2,7 @@ import datetime as dt
 
 import torch
 
-from flare_nrt.detector import EventTracker, FrameBuffer, baseline_slots, is_alert
+from centella.detector import EventTracker, FrameBuffer, baseline_slots, is_alert
 
 T = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.UTC)
 M = dt.timedelta(minutes=1)

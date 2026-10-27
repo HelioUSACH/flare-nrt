@@ -1,16 +1,16 @@
 # Example unit (checklist F.29). The maintainers install it; paths are settings.
 [Unit]
-Description=flare-nrt detection loop (AIA synoptic → usach.flare.nrt)
+Description=Centella detection loop (AIA synoptic → usach.flare.nrt)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=flare
-Group=flare
-WorkingDirectory=/opt/flare-nrt
-EnvironmentFile=/etc/flare-nrt/flare.env
-ExecStart=/opt/flare-nrt/.venv/bin/python -m flare_nrt.loop
+User=centella
+Group=centella
+WorkingDirectory=/opt/centella
+EnvironmentFile=/etc/centella/centella.env
+ExecStart=/opt/centella/.venv/bin/python -m centella.loop
 Restart=always
 RestartSec=30
 # CPU budget on a shared VM (docs: INTEGRATION.md "Resources")
@@ -19,7 +19,7 @@ MemoryMax=4G
 Nice=5
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/srv/flare-nrt
+ReadWritePaths=/srv/centella
 PrivateTmp=true
 
 [Install]

@@ -1,6 +1,6 @@
 """Stored synthetic input → full inference path → results, events, API,
 curated archive. Uses the tiny stand-in ensemble (conftest); the real-weights
-check is tests/test_real_weights.py (skipped unless FLARE_REAL_WEIGHTS is set)."""
+check is tests/test_real_weights.py (skipped unless CENTELLA_REAL_WEIGHTS is set)."""
 
 import datetime as dt
 import json
@@ -8,12 +8,12 @@ import json
 from conftest import T0, write_slot
 from fastapi.testclient import TestClient
 
-from flare_nrt import curate
-from flare_nrt.goes import Flare
-from flare_nrt.grid import CADENCE, iso
-from flare_nrt.loop import run
-from flare_nrt.server import create_app, live_status
-from flare_nrt.store import ResultStore, read_events, read_json, write_json_atomic
+from centella import curate
+from centella.goes import Flare
+from centella.grid import CADENCE, iso
+from centella.loop import run
+from centella.server import create_app, live_status
+from centella.store import ResultStore, read_events, read_json, write_json_atomic
 
 
 def _make_day(cfg, n=16, bad=(5,), flare_from=12):
@@ -78,9 +78,9 @@ def test_api_contract_and_freshness(cfg):
     s = client.get("/api/status").json()
     assert s["live_status"] == "live"
     for k in ("timestamp", "probability", "flare_detected", "location", "ensemble_std",
-              "seconds_since_update", "threshold", "observation_time", "model_version"):
+              "seconds_since_update", "threshold", "observation_time", "model_version", "model"):
         assert k in s
-    assert s["timestamp"].endswith("Z")
+    assert s["timestamp"].endswith("Z") and s["model"] == "Centella"
     assert client.get("/api/events").status_code == 200
     assert "points" in client.get("/api/results?hours=168").json()
     assert "coverage_24h" in client.get("/api/health").json()
@@ -100,8 +100,8 @@ def test_live_status_rules():
 
 
 def test_missing_slot_is_skipped_once_later_slots_arrive(cfg):
-    from flare_nrt.loop import should_skip
-    from flare_nrt.source import ReplaySource
+    from centella.loop import should_skip
+    from centella.source import ReplaySource
 
     slots = [T0 + i * CADENCE for i in range(4)]
     for s in slots[1:]:
@@ -122,7 +122,7 @@ def test_curation_builds_archive_day(cfg):
     s = curate.curate_day(cfg, day, [f], "test", True)
     out = cfg.archive_dir / "2026" / "10" / "20"
     assert (out / "day.json").exists() and (out / "frames.csv").exists() and (out / "flares.csv").exists()
-    assert s["schema"] == "flare-nrt-archive/1"
+    assert s["schema"] == "centella-archive/1"
     assert s["slots"]["kept_by_reason"].get("flare", 0) == 16  # raw kept even for the QC-rejected slot
     assert len(s["files"]) == 4 * s["slots"]["kept"]
     assert all(len(h) == 64 for h in s["files"].values())

@@ -4,6 +4,9 @@
 
 Recalibration on live synoptic data; same network weights as 1.x.
 
+- **Renamed to Centella** (package `centella`, settings `CENTELLA_*`, units
+  `centella-*.service`). The portal product id stays `usach.flare.nrt`.
+
 - **Rolling baseline**: input difference against the mean of t−8, t−10,
   t−12 min, replacing the hourly "quiet Sun" baseline whose age grew to
   hours and drove the false alarms of 1.x (live TSS 0.10).

@@ -1,9 +1,9 @@
 import datetime as dt
 import json
 
-from flare_nrt.curate import label, merge, negative_blocks
-from flare_nrt.goes import Flare, class_flux, parse_swpc
-from flare_nrt.validate import evaluate
+from centella.curate import label, merge, negative_blocks
+from centella.goes import Flare, class_flux, parse_swpc
+from centella.validate import evaluate
 
 D = dt.datetime(2026, 7, 1, tzinfo=dt.UTC)
 M = dt.timedelta(minutes=1)
