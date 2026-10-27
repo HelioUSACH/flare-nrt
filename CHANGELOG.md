@@ -4,6 +4,8 @@
 
 Recalibration on live synoptic data; same network weights as 1.x.
 
+- **Python 3.10+** (was 3.11): `dt.timezone.utc`, and one ISO parser
+  (`grid.parse_datetime`) for every provider time spelling.
 - **Renamed to Centella** (package `centella`, settings `CENTELLA_*`, units
   `centella-*.service`). The portal product id stays `usach.flare.nrt`.
 

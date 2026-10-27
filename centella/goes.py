@@ -14,7 +14,7 @@ import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 
-from .grid import as_utc
+from .grid import parse_datetime
 
 _LETTER = {"A": 1e-8, "B": 1e-7, "C": 1e-6, "M": 1e-5, "X": 1e-4}
 
@@ -51,7 +51,7 @@ def _t(v) -> dt.datetime | None:
     if not v or str(v).lower() in {"unk", "null", "none", "nan"}:
         return None
     try:
-        return as_utc(dt.datetime.fromisoformat(str(v).replace("Z", "+00:00").replace(" ", "T")))
+        return parse_datetime(str(v))
     except ValueError:
         return None
 

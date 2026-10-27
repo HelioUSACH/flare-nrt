@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from centella import curate
 from centella.goes import Flare
-from centella.grid import CADENCE, iso
+from centella.grid import CADENCE, iso, parse_iso
 from centella.loop import run
 from centella.server import create_app, live_status
 from centella.store import ResultStore, read_events, read_json, write_json_atomic
@@ -41,7 +41,7 @@ def test_replay_produces_consistent_outputs(cfg):
     assert len(ok) == proc.frame_count == 7  # i = 6, 7, 8, 12…15
     for r in ok:
         assert 0 <= r["probability"] <= 1 and len(r["ensemble_scores"]) == 2
-        assert r["baseline_slots"][0] == iso(dt.datetime.fromisoformat(r["slot"].replace("Z", "+00:00"))
+        assert r["baseline_slots"][0] == iso(parse_iso(r["slot"])
                                              - dt.timedelta(minutes=8))
     evs = read_events(cfg.events_path)
     assert len(evs) >= 1 and evs[-1]["n_alert_frames"] >= 1
@@ -68,7 +68,7 @@ def test_api_contract_and_freshness(cfg):
     # replay writes no heartbeat → a dead loop must read as stale
     s = client.get("/api/status").json()
     assert s["live_status"] == "stale" and s["stale_reason"] == "loop_not_running"
-    now = iso(dt.datetime.now(dt.UTC))
+    now = iso(dt.datetime.now(dt.timezone.utc))
     write_json_atomic(cfg.state_dir / "heartbeat.json", {"heartbeat": now})
     s = client.get("/api/status").json()
     # the synthetic slots are days old: a running loop on old inputs is stale too
@@ -87,7 +87,7 @@ def test_api_contract_and_freshness(cfg):
 
 
 def test_live_status_rules():
-    now = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.UTC)
+    now = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.timezone.utc)
     st = {"timestamp": "2026-10-20T11:58:00Z", "last_update": "2026-10-20T11:58:00Z"}
     hb = {"heartbeat": "2026-10-20T11:59:30Z"}
     assert live_status(st, hb, now, 600)[0] == "live"

@@ -54,7 +54,7 @@ class LiveSource:
                     tmp.write_bytes(r.content)
                     tmp.rename(p)
                     n += 1
-                    self.last_download = dt.datetime.now(dt.UTC)
+                    self.last_download = dt.datetime.now(dt.timezone.utc)
                     self._missed.pop(p, None)
                 else:
                     self._missed[p] = now

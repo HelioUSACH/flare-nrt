@@ -14,7 +14,7 @@ from centella.config import Settings
 from centella.grid import CHANNELS, file_name
 from centella.model import build_member
 
-T0 = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.UTC)
+T0 = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.timezone.utc)
 
 
 def write_fits(path, wave, slot, size=512, quality=0, exptime=2.9, flare=0.0, blank=False):

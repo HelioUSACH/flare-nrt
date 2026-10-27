@@ -99,8 +99,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", help="write the JSON report here")
     a = ap.parse_args(argv)
     cfg = Settings()
-    d0 = dt.datetime.strptime(a.start, "%Y-%m-%d").replace(tzinfo=dt.UTC)
-    d1 = dt.datetime.strptime(a.end, "%Y-%m-%d").replace(tzinfo=dt.UTC)
+    d0 = dt.datetime.strptime(a.start, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
+    d1 = dt.datetime.strptime(a.end, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
     store = ResultStore(cfg.results_dir)
     rows, d = [], d0
     while d <= d1:

@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 def _day(name: str) -> dt.datetime | None:
     try:
-        return dt.datetime.strptime(name, "%Y%m%d").replace(tzinfo=dt.UTC)
+        return dt.datetime.strptime(name, "%Y%m%d").replace(tzinfo=dt.timezone.utc)
     except ValueError:
         return None
 
@@ -75,7 +75,7 @@ class Retention:
         out = []
         for p in sorted(self.cfg.archive_dir.glob("*/*/*")):
             try:
-                d = dt.datetime(int(p.parent.parent.name), int(p.parent.name), int(p.name), tzinfo=dt.UTC)
+                d = dt.datetime(int(p.parent.parent.name), int(p.parent.name), int(p.name), tzinfo=dt.timezone.utc)
             except ValueError:
                 continue
             out.append((d, p))

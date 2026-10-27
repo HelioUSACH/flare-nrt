@@ -5,7 +5,7 @@ from centella.curate import label, merge, negative_blocks
 from centella.goes import Flare, class_flux, parse_swpc
 from centella.validate import evaluate
 
-D = dt.datetime(2026, 7, 1, tzinfo=dt.UTC)
+D = dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc)
 M = dt.timedelta(minutes=1)
 
 

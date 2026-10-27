@@ -146,7 +146,7 @@ def _link_or_copy(src: Path, dst: Path) -> None:
 
 def curate_day(cfg: Settings, day: dt.datetime, flares: list[Flare], labels_source: str,
                labels_complete: bool) -> dict:
-    day = day.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=dt.UTC)
+    day = day.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=dt.timezone.utc)
     nxt = day + dt.timedelta(days=1)
     pre, post = dt.timedelta(minutes=cfg.pre_flare_min), dt.timedelta(minutes=cfg.post_flare_min)
     rows = {r["slot"]: r for r in ResultStore(cfg.results_dir).read_day(f"{day:%Y%m%d}")}
@@ -221,7 +221,7 @@ def pending_days(cfg: Settings, now: dt.datetime) -> list[dt.datetime]:
     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     for p in sorted(cfg.staging_dir.glob("*")):
         try:
-            d = dt.datetime.strptime(p.name, "%Y%m%d").replace(tzinfo=dt.UTC)
+            d = dt.datetime.strptime(p.name, "%Y%m%d").replace(tzinfo=dt.timezone.utc)
         except ValueError:
             continue
         if d < today and not is_curated(cfg.archive_dir, d):
@@ -240,7 +240,10 @@ def main(argv=None) -> int:
     cfg = Settings()
     cfg.ensure_dirs()
     now = utcnow()
-    days = [dt.datetime.strptime(a.day, "%Y-%m-%d").replace(tzinfo=dt.UTC)] if a.day else pending_days(cfg, now)
+    if a.day:
+        days = [dt.datetime.strptime(a.day, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)]
+    else:
+        days = pending_days(cfg, now)
     if not a.force:
         days = [d for d in days if not is_curated(cfg.archive_dir, d)]
     if not days:

@@ -4,7 +4,7 @@ import torch
 
 from centella.detector import EventTracker, FrameBuffer, baseline_slots, is_alert
 
-T = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.UTC)
+T = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.timezone.utc)
 M = dt.timedelta(minutes=1)
 
 
@@ -59,3 +59,12 @@ def test_tracker_state_roundtrip():
     tr2 = EventTracker(10, st["last_id"], st["current"])
     eid, opened, _ = tr2.update(T + 2 * M, True, 0.91)
     assert (eid, opened) == (1, False)
+
+
+def test_parse_datetime_provider_spellings():
+    from centella.grid import parse_datetime
+    ref = dt.datetime(2026, 6, 20, 9, 22, 5, 120000, tzinfo=dt.timezone.utc)
+    for s in ("2026-06-20T09:22:05.12Z", "2026-06-20T09:22:05.12", "2026-06-20 09:22:05.120000",
+              "2026-06-20T06:22:05.12-03:00", "2026-06-20T09:22:05.12+0000"):
+        assert parse_datetime(s) == ref, s
+    assert parse_datetime("2026-06-20T09:22Z") == dt.datetime(2026, 6, 20, 9, 22, tzinfo=dt.timezone.utc)

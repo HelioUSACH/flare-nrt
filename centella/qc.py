@@ -31,7 +31,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .grid import as_utc
+from .grid import parse_datetime
 
 MAX_NONFINITE = 0.01
 MAX_TIME_OFFSET_S = 90
@@ -58,7 +58,7 @@ def _header_time(h) -> dt.datetime | None:
         v = h.get(key)
         if v:
             try:
-                return as_utc(dt.datetime.fromisoformat(str(v).rstrip("Z").replace("_TAI", "")))
+                return parse_datetime(str(v).replace("_TAI", ""))
             except ValueError:
                 continue
     return None
