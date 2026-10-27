@@ -176,14 +176,16 @@ class Processor:
 
 def should_skip(src, slot: dt.datetime, now: dt.datetime, cfg: Settings) -> bool:
     """A missing slot is given up after ``give_up_min``, or after
-    ``skip_after_min`` if a later slot (within 10 min) has already arrived —
-    one lost file must not hold the whole stream back."""
+    ``skip_after_min`` if any later slot (up to ``give_up_min`` later) has
+    already arrived — one lost file, or a cold start whose first minutes the
+    archive doesn't have, must not hold the whole stream back."""
     age = now - slot
     if age >= dt.timedelta(minutes=cfg.give_up_min):
         return True
     if age < dt.timedelta(minutes=cfg.skip_after_min):
         return False
-    return any(src.paths(slot + k * CADENCE) is not None for k in range(1, 6))
+    n_later = int(cfg.give_up_min // 2)
+    return any(src.paths(slot + k * CADENCE) is not None for k in range(1, n_later + 1))
 
 
 def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Processor:
@@ -204,7 +206,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Pr
         proc.flush()
         return proc
 
-    retention = Retention(cfg)
+    retention = Retention(cfg, every_sec=600 if cfg.staging_hours > 0 else 3600)
     st = read_json(cfg.loop_state_path, {}) or {}
     now = utcnow()
     nxt = floor_slot(now - dt.timedelta(minutes=20))

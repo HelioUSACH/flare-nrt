@@ -1,5 +1,8 @@
-"""Where FITS files come from. ``LiveSource`` downloads the dated JSOC synoptic
-archive over HTTPS into ``staging/YYYYMMDD/``; ``ReplaySource`` reads a
+"""Where FITS files come from. ``LiveSource`` fills ``staging/YYYYMMDD/`` over
+HTTPS from two JSOC places: ``mostrecent/`` (the newest image of each channel,
+updated in real time; each is filed under the 2-min slot of its own T_OBS)
+and the dated archive (``YYYY/MM/DD/HHH00/``, which fills gaps but can lag
+behind real time); ``ReplaySource`` reads a
 directory that already holds files (validation, tests). Both expose
 ``paths(slot)`` → {wave: Path} or None while a channel is missing."""
 
@@ -9,7 +12,7 @@ import datetime as dt
 import logging
 from pathlib import Path
 
-from .grid import CADENCE, CHANNELS, day_key, file_name, file_url, floor_slot, parse_file_name
+from .grid import CADENCE, CHANNELS, day_key, file_name, file_url, floor_slot, parse_datetime, parse_file_name
 
 log = logging.getLogger(__name__)
 
@@ -30,10 +33,48 @@ class LiveSource:
     def path_for(self, slot: dt.datetime, wave: int) -> Path:
         return self.dir / day_key(slot) / file_name(slot, wave)
 
-    def refresh(self, now: dt.datetime) -> int:
-        """Fetch every missing file in [now − lookback, now]. Network errors
-        are logged and retried on the next poll, never raised."""
+    def refresh_mostrecent(self) -> int:
+        """The newest image of each channel, filed under its own slot."""
+        from astropy.io import fits
+
         n = 0
+        for w in CHANNELS:
+            url = f"{self.base}/mostrecent/AIAsynoptic{w:04d}.fits"
+            try:
+                r = self.session.get(url, timeout=self.timeout)
+            except Exception as e:
+                log.warning("mostrecent %d failed: %s", w, e)
+                continue
+            if r.status_code != 200 or not r.content:
+                log.warning("mostrecent %d: HTTP %s", w, r.status_code)
+                continue
+            self.dir.mkdir(parents=True, exist_ok=True)
+            tmp = self.dir / f".mostrecent_{w}.part"
+            tmp.write_bytes(r.content)
+            try:
+                with fits.open(tmp) as h:
+                    hdr = next((x.header for x in h if x.data is not None), h[0].header)
+                    t_obs = hdr.get("T_OBS") or hdr.get("DATE-OBS")
+                slot = floor_slot(parse_datetime(str(t_obs).replace("_TAI", "")))
+            except Exception as e:
+                log.warning("mostrecent %d unreadable: %s", w, e)
+                tmp.unlink(missing_ok=True)
+                continue
+            dest = self.path_for(slot, w)
+            if dest.exists():
+                tmp.unlink(missing_ok=True)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            tmp.rename(dest)
+            n += 1
+            self.last_download = dt.datetime.now(dt.timezone.utc)
+        return n
+
+    def refresh(self, now: dt.datetime) -> int:
+        """Newest images first, then every missing file of [now − lookback,
+        now] from the dated archive. Network errors are logged and retried
+        on the next poll, never raised."""
+        n = self.refresh_mostrecent()
         s, end = floor_slot(now - self.lookback), floor_slot(now)
         while s <= end:
             for w in CHANNELS:

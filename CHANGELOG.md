@@ -4,6 +4,10 @@
 
 Recalibration on live synoptic data; same network weights as 1.x.
 
+- **Live source** reads JSOC `mostrecent/` every poll (filed under the slot of
+  its own T_OBS) besides the dated archive, which lags behind real time;
+  `CENTELLA_STAGING_HOURS` keeps only the last N hours of raw FITS on a
+  small disk; a cold start skips the slots the archive lacks.
 - **Python 3.10+** (was 3.11): `dt.timezone.utc`, and one ISO parser
   (`grid.parse_datetime`) for every provider time spelling.
 - **Renamed to Centella** (package `centella`, settings `CENTELLA_*`, units

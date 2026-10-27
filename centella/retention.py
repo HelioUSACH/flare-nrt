@@ -12,7 +12,9 @@ Rules, in order:
    (docs/archive-format.md, "Off-VM copy").
 3. ``results/YYYYMMDD.jsonl`` older than ``results_days`` is deleted
    (~0.5 MB/day).
-4. If free space is below ``min_free_gb``: oldest archive days, then
+4. ``staging_hours`` > 0 (a small disk, no curation): raw files older than
+   that many hours are deleted, whatever day they belong to.
+5. If free space is below ``min_free_gb``: oldest archive days, then
    oldest staging days, until it isn't — never the last 24 h of staging,
    which the baselines and today's curation need.
 """
@@ -25,7 +27,7 @@ import shutil
 import time
 from pathlib import Path
 
-from .grid import utcnow
+from .grid import parse_file_name, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +95,13 @@ class Retention:
                     log.warning("deleting uncurated staging day %s", p.name)
                 shutil.rmtree(p, ignore_errors=True)
                 removed.append(str(p))
+        if cfg.staging_hours > 0:
+            cutoff = now - dt.timedelta(hours=cfg.staging_hours)
+            for p in cfg.staging_dir.glob("*/AIA*.fits"):
+                parsed = parse_file_name(p.name)
+                if parsed and parsed[0] < cutoff:
+                    p.unlink(missing_ok=True)
+                    removed.append(str(p))
         for d, p in self._archive_days():
             if (day0 - d).total_seconds() / 86400 > cfg.archive_local_days:
                 shutil.rmtree(p, ignore_errors=True)
@@ -110,6 +119,6 @@ class Retention:
             log.warning("low disk (%.1f GB free): deleting %s", free_gb(cfg.data_dir), p)
             shutil.rmtree(p, ignore_errors=True)
             removed.append(str(p))
-        for r in removed:
-            log.info("retention removed %s", r)
+        if removed:
+            log.info("retention removed %d path(s), oldest %s", len(removed), min(removed))
         return removed

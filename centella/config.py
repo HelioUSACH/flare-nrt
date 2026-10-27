@@ -42,6 +42,8 @@ class Settings:
 
     # retention
     staging_days: float = field(default_factory=lambda: float(_env("STAGING_DAYS", "3")))
+    # > 0: keep only the last N hours of raw FITS (small disks; no curation)
+    staging_hours: float = field(default_factory=lambda: float(_env("STAGING_HOURS", "0")))
     archive_local_days: float = field(default_factory=lambda: float(_env("ARCHIVE_LOCAL_DAYS", "14")))
     results_days: float = field(default_factory=lambda: float(_env("RESULTS_DAYS", "400")))
     min_free_gb: float = field(default_factory=lambda: float(_env("MIN_FREE_GB", "10")))

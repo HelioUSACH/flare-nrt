@@ -109,6 +109,8 @@ def test_missing_slot_is_skipped_once_later_slots_arrive(cfg):
     src = ReplaySource(cfg.staging_dir)
     assert not should_skip(src, slots[0], slots[0] + dt.timedelta(minutes=10), cfg)
     assert should_skip(src, slots[0], slots[0] + dt.timedelta(minutes=25), cfg)
+    far = T0 - 30 * CADENCE    # cold start: next file arrives an hour later
+    assert should_skip(src, far, far + dt.timedelta(minutes=25), cfg)
     lone = T0 + 100 * CADENCE  # nothing after it: wait up to give_up_min
     assert not should_skip(src, lone, lone + dt.timedelta(minutes=60), cfg)
     assert should_skip(src, lone, lone + dt.timedelta(minutes=121), cfg)
@@ -148,3 +150,44 @@ def test_channel_previews(cfg):
         assert Image.open(BytesIO(r.content)).size == (512, 512)
     assert client.get("/api/image/94.png").status_code == 404
     assert client.get("/api/image/131.png?kind=raw").status_code == 422
+
+
+def test_mostrecent_is_filed_under_its_own_slot(cfg, tmp_path):
+    from centella.source import LiveSource
+
+    slot = T0 + 3 * CADENCE
+    src_dir = tmp_path / "jsoc"
+    write_slot(src_dir, slot)
+    blobs = {w: (src_dir / f"{slot:%Y%m%d}" / f"AIA{slot:%Y%m%d}_{slot:%H%M}_{w:04d}.fits").read_bytes()
+             for w in (131, 171, 304, 1600)}
+
+    class Resp:
+        def __init__(self, code, content=b""):
+            self.status_code, self.content = code, content
+
+    class Session:
+        headers = {}
+
+        def get(self, url, timeout=None):
+            for w, b in blobs.items():
+                if url.endswith(f"/mostrecent/AIAsynoptic{w:04d}.fits"):
+                    return Resp(200, b)
+            return Resp(404)
+
+    live = LiveSource(cfg.staging_dir, "https://example.invalid/synoptic", 30, 5)
+    live.session = Session()
+    assert live.refresh(slot + dt.timedelta(minutes=1)) == 4
+    assert live.paths(slot) is not None and live.last_download is not None
+    assert live.refresh(slot + dt.timedelta(minutes=2)) == 0     # same images: nothing new
+
+
+def test_staging_hours_keeps_only_recent_files(cfg):
+    from centella.retention import Retention
+
+    cfg.staging_hours = 1
+    old, new = T0, T0 + dt.timedelta(hours=3)
+    write_slot(cfg.staging_dir, old)
+    write_slot(cfg.staging_dir, new)
+    Retention(cfg).run(now=new + dt.timedelta(minutes=5))
+    left = sorted(p.name for p in cfg.staging_dir.glob("*/AIA*.fits"))
+    assert len(left) == 4 and all(f"_{new:%H%M}_" in n for n in left)
