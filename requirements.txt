@@ -8,3 +8,4 @@ torchvision>=0.17
 requests>=2.31
 fastapi>=0.110
 uvicorn>=0.29
+pillow>=10

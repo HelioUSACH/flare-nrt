@@ -129,3 +129,22 @@ def test_curation_builds_archive_day(cfg):
     lines = (out / "frames.csv").read_text().splitlines()
     assert len(lines) == 721
     assert json.loads((out / "day.json").read_text())["labels"]["by_letter"]["M"] == 1
+
+
+def test_channel_previews(cfg):
+    _make_day(cfg, n=10, bad=())
+    run(cfg, replay_dir=cfg.staging_dir)  # replay reads the same staging tree the API renders from
+    client = TestClient(create_app(cfg))
+    ch = client.get("/api/channels").json()
+    assert [c["wave"] for c in ch["channels"]] == [131, 171, 304, 1600]
+    assert all(c["image"] and c["difference"] for c in ch["channels"])
+    for kind in ("img", "diff"):
+        r = client.get(f"/api/image/131.png?kind={kind}")
+        assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+        assert r.content[:8] == b"\x89PNG\r\n\x1a\n"
+        from io import BytesIO
+
+        from PIL import Image
+        assert Image.open(BytesIO(r.content)).size == (512, 512)
+    assert client.get("/api/image/94.png").status_code == 404
+    assert client.get("/api/image/131.png?kind=raw").status_code == 422

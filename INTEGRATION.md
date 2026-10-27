@@ -56,7 +56,11 @@ the chart is in observation time rather than processing time.
 
 Other endpoints (internal): `/api/events?days=30`, `/api/results?hours=24`
 (probability series), `/api/health` (24 h coverage, status counts, median
-data latency, free disk).
+data latency, free disk), `/api/channels` (the 4 channels of the latest
+result: provider time, image/difference available) and
+`/api/image/{131|171|304|1600}.png?kind=img|diff` (512 px PNG, north up,
+rendered on request from the staging FITS, cached a day; `X-Observation-Time`
+header). The portal proxies the images; Centella stays on 127.0.0.1.
 
 ## Units
 
