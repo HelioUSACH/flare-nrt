@@ -45,9 +45,15 @@ chosen on this month, so these numbers are optimistic:
 
 | L (min) | threshold | M/X detected | ≥ M2 | M1–M2 | false alarms | alert vs GOES peak (median) |
 |---|---|---|---|---|---|---|
-| 6 | 0.80 | 63 % | 95 % | 41 % | 3 | −1 min |
-| **8** | **0.80** | **78 %** | **100 % (22/22)** | **62 %** | **4** (≈1/week) | **−1 min** |
-| 10 | 0.80 | 80 % | 100 % | 66 % | 17 | −2 min |
+| 6 | 0.80 | 61 % (33/54) | 95 % | 38 % | 2 | −1 min |
+| 8 | 0.75 | 74 % (40/54) | 100 % | 56 % | 6 | −1 min |
+| **8** | **0.80** | **72 % (39/54)** | **100 % (22/22)** | **53 %** | **3** (≈ 1 per 9 days) | **−1 min** |
+| 10 | 0.80 | 76 % (41/54) | 100 % | 59 % | 16 | −2 min |
+
+The operational loop itself (v2.0.0, replay of the same month through
+`flare_nrt.loop`, `python -m flare_nrt.validate`) reproduces the L = 8,
+0.80 row exactly: 39/54, 22/22 ≥ M2, 3 false alarms, 51 alert runs (42 on
+M/X, 6 on C).
 
 **Independent check, 2026-04-23 → 25** (48 h, 10 M/X incl. X2.4, X2.5;
 L = 6, threshold 0.80, the operational loop itself): 10/10 detected,
@@ -69,9 +75,9 @@ location on the disk. Report the live numbers here weekly
   in `docs/archive-format.md` is built for that).
 - **Domain gap synoptic vs level-1.** With an identical baseline the
   output on synoptic data is ~0.13, vs ~0.001 on level-1.
-- **Dense activity.** Missed flares are all M1.0–M1.4 with p_max 0.36–0.68;
-  10 of the 12 misses fall on 2026-07-04/05 (a flare every ~40 min), when
-  the previous flare sits inside the baseline.
+- **Dense activity and small flares.** All 15 missed flares are M1.0–M1.4;
+  12 of them fall on 2026-07-04/05 (a flare every ~40 min), when the
+  previous flare sits inside the baseline.
 - **Quiet Sun under-tested.** The calibration month was very active; the
   false-alarm rate on long quiet periods is not yet measured.
 - **QC gaps.** Frames with QUALITY ≠ 0 are dropped: the daily 21:00 UT
