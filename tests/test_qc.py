@@ -82,3 +82,10 @@ def test_raw_dimming_at_constant_exposure_is_still_caught(tmp_path):
     with fits.open(paths[171], mode="update") as h:
         h[1].data = h[1].data * 0.05
     assert "median_jump:171" in qc.check_slot(s, paths).reasons
+
+
+def test_quicklook_bit_alone_is_not_a_reject(tmp_path):
+    q = QualityControl().check_slot(T0, _slot(tmp_path, T0, bad_wave=171, quality=1 << 30))
+    assert q.ok, q.reasons
+    q = QualityControl().check_slot(T0, _slot(tmp_path / "b", T0, bad_wave=171, quality=(1 << 30) | 65536))
+    assert f"quality:171={(1 << 30) | 65536}" in q.reasons

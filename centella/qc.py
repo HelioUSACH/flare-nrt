@@ -6,7 +6,9 @@ Rules (a slot is rejected if any channel fails):
 
 - ``unreadable``: FITS can't be opened or has no 2-D image.
 - ``quality``: header QUALITY != 0 (e.g. the daily 21:00 UT synoptic frame,
-  QUALITY=65536, or the July 2026 spacecraft flags, QUALITY=2097152).
+  QUALITY=65536, or the July 2026 spacecraft flags, QUALITY=2097152). Bit 30
+  (0x40000000, "quicklook") is ignored: every near-real-time image carries it
+  (JSOC ``mostrecent/``), the archived ones used for validation don't.
 - ``exptime``: EXPTIME <= 0.
 - ``wavelength``: WAVELNTH doesn't match the file's channel.
 - ``nonfinite``: more than 1 % of pixels NaN/inf.
@@ -34,6 +36,7 @@ import numpy as np
 from .grid import parse_datetime
 
 MAX_NONFINITE = 0.01
+QUICKLOOK_BIT = 1 << 30  # set on all near-real-time AIA frames
 MAX_TIME_OFFSET_S = 90
 MAX_CHANNEL_SPREAD_S = 120
 MEDIAN_RATIO = (0.25, 4.0)
@@ -111,8 +114,9 @@ class QualityControl:
             if d.ndim != 2 or d.shape[0] != d.shape[1] or d.shape[0] < 512:
                 res.reasons.append(f"unreadable:{wave}")
                 continue
-            if int(h.get("QUALITY", 0) or 0) != 0:
-                res.reasons.append(f"quality:{wave}={int(h.get('QUALITY'))}")
+            qual = int(h.get("QUALITY", 0) or 0)
+            if qual & ~QUICKLOOK_BIT:
+                res.reasons.append(f"quality:{wave}={qual}")
             if float(h.get("EXPTIME", 1) or 0) <= 0:
                 res.reasons.append(f"exptime:{wave}")
             wl = h.get("WAVELNTH")

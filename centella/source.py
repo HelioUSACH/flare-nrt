@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-import os
 import shutil
 from pathlib import Path
 
@@ -79,10 +78,7 @@ class LiveSource:
                 if dest.exists():
                     continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.link(tmp, dest)       # same bytes under both slots, no extra disk
-                except OSError:
-                    shutil.copyfile(tmp, dest)
+                shutil.copyfile(tmp, dest)   # a copy, not a hard link: tools that move files refuse links
                 new = True
             tmp.unlink(missing_ok=True)
             if new:

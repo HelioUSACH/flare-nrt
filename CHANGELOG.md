@@ -2,7 +2,8 @@
 
 ## 2.0.1 (unreleased)
 
-- Live source: each `mostrecent/` image is filed under every 2-min slot within 90 s of its T_OBS (the QC time tolerance), not only under floor(T_OBS). Before, images taken late in their slot failed `time_offset` and slots rarely had all 4 channels.
+- QC: QUALITY bit 30 (0x40000000, quicklook) is no longer a reject. Every near-real-time AIA image has it, so in live mode every slot was `qc_reject` and no probability was ever made.
+- Live source: each `mostrecent/` image is filed (as a copy) under every 2-min slot within 90 s of its T_OBS (the QC time tolerance), not only under floor(T_OBS). Before, images taken late in their slot failed `time_offset` and slots rarely had all 4 channels.
 - Loop: on a cold start it no longer waits for slots from before the start that only the lagging archive could fill. `CENTELLA_SKIP_AFTER_MIN` default 20 → 12.
 - API: `/api/image` and `/api/channels` show the newest staged image of each channel until the first full result exists (the difference once t−8/−10/−12 are staged).
 
