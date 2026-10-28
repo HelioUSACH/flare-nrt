@@ -115,6 +115,27 @@ def aia131_rule(rows: list[dict], flares: list[Flare], max_false_alarms: int, me
                                          "false_alarms", "median_min_from_start", "median_min_from_peak")}}
 
 
+def alternation(rows: list[dict], p_max: float = 0.3, min_step: float = 0.02) -> dict:
+    """The low-probability 2-frame alternation seen in 1.x: among
+    consecutive ``ok`` slots below ``p_max``, the fraction of steps that
+    reverse the previous step's sign with both steps ≥ ``min_step``. A
+    random walk gives ~0.5 of reversals overall; a strict up-down-up
+    alternation gives ~1."""
+    ok = sorted((parse_iso(r["slot"]), r["probability"]) for r in rows
+                if r.get("status") == "ok" and r.get("probability") is not None)
+    steps = []
+    for (t0, p0), (t1, p1) in zip(ok, ok[1:], strict=False):
+        if t1 - t0 == dt.timedelta(minutes=2) and p0 < p_max and p1 < p_max:
+            steps.append((t1, p1 - p0))
+    n = rev = 0
+    for (ta, a), (tb, b) in zip(steps, steps[1:], strict=False):
+        if tb - ta == dt.timedelta(minutes=2) and abs(a) >= min_step and abs(b) >= min_step:
+            n += 1
+            rev += a * b < 0
+    return {"pairs": n, "reversal_fraction": round(rev / n, 3) if n else None,
+            "p_max": p_max, "min_step": min_step}
+
+
 def _pod(ps):
     return round(sum(p["detected"] for p in ps) / len(ps), 3) if ps else None
 
@@ -141,6 +162,7 @@ def main(argv=None) -> int:
     flares = read_csv(Path(a.flares_csv)) if a.flares_csv else fetch_swpc(cfg.goes_url)
     rep = evaluate(rows, flares, cfg.merge_gap_min)
     rep["baseline"] = aia131_rule(rows, flares, rep["false_alarms"], cfg.merge_gap_min)
+    rep["alternation"] = alternation(rows)
     txt = json.dumps(rep, indent=2)
     if a.out:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)

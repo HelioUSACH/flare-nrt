@@ -85,3 +85,15 @@ def test_baseline_rule_at_matched_false_alarms():
     assert b["available"] and b["k"] > 0.3 and b["false_alarms"] == 0 and b["mx_detected"] == 1
     old_rows = [{k: v for k, v in r.items() if k != "aia131_excess"} for r in rows]
     assert aia131_rule(old_rows, flares, 0)["available"] is False
+
+
+def test_alternation_index():
+    from centella.validate import alternation
+
+    def rows(ps):
+        return [{"slot": (D + 2 * i * M).strftime("%Y-%m-%dT%H:%M:%SZ"), "status": "ok", "probability": p}
+                for i, p in enumerate(ps)]
+
+    assert alternation(rows([0.05, 0.15] * 10))["reversal_fraction"] == 1.0
+    assert alternation(rows([0.05 + 0.01 * i for i in range(20)]))["pairs"] == 0      # steps < 0.02
+    assert alternation(rows([0.05 + 0.03 * i for i in range(8)]))["reversal_fraction"] == 0.0

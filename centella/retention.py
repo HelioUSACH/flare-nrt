@@ -13,7 +13,7 @@ Rules:
 5. ``cache/*.png`` (API previews) older than ``image_cache_days`` (1); the
    API prunes these itself too.
 6. ``archive/YYYY/MM/DD`` older than ``archive_local_days`` (7): the
-   long-term archive is the off-VM copy (docs/archive-format.md).
+   long-term archive is the off-server copy (docs/archive-format.md).
 7. ``results/YYYYMMDD.jsonl`` older than ``results_days`` (400, ~1 MB/day),
    and ``reports/*.json`` (weekly validation) older than that too.
 8. If free space is below ``min_free_gb``: tensors, archive days, then

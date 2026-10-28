@@ -65,5 +65,5 @@ duplicates results.
 
 ## Disk
 
-About 21 GB at steady state with the defaults. The breakdown is in
+About 25 GB at steady state with the defaults. The breakdown is in
 INTEGRATION.md, "Resources".

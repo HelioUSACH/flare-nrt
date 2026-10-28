@@ -1,6 +1,62 @@
 # Changelog
 
-## 2.0.1 (unreleased)
+## 2.1.0 — 2026-10-28
+
+Ready for integration into the portal (`docs/models/CONTRIBUTING-A-MODEL.md`
+checklist). Same weights and threshold; `/api/status` only adds fields.
+
+**Contract**
+- `/api/status`: `state` (quiet / onset / active / decay), `raw_score`
+  (labelled; equal to `probability`, no gating), `input_age_s` (per request;
+  `stale` beyond 900 s, was 3600 s on the observation time), `last_frame`
+  (what happened to the newest slot and why), `max_input_age_sec`,
+  `baseline_missing`, `n_baseline_used`, `event_t_start`. T_OBS in
+  `inputs` with `Z`.
+- A live frame whose newest T_OBS is older than 15 min is not run through
+  the model (`inputs_old`).
+
+**Display endpoints (proposed, INTEGRATION.md):** `/api/series`,
+`/api/frames`, `/api/image/{wave}.png?slot=`, `/api/gradcam/{latest|slot}.png`;
+events carry the URL of their peak's Grad-CAM. Grad-CAM of the ensemble
+(`Ensemble.gradcam`) for the newest frame and every alert.
+
+**Loop and input**
+- Polls `mostrecent/` every 30 s (was 60), retries a dropped connection,
+  and keeps polling while working through a backlog. The dated archive
+  (which lags) is queried at most every 10 min for at most 20 s. Before, one
+  pass over 60 min × 4 channels of 404s took more than 2 min and newer
+  `mostrecent/` images were missed.
+- 2 of the 3 baseline frames suffice (`CENTELLA_MIN_BASELINE=2`); the
+  validated rule used 3 of 3 (`CENTELLA_MIN_BASELINE=3` restores it).
+- Every result records `aia131_excess` (disk-integrated 131 Å rise over the
+  same baseline), the input of the baseline rule.
+
+**Storage:** raw FITS 7 × 24 h (was 3 days), model-input tensors 2 days
+(new, `tensors/`), Grad-CAM 2 days and 400 days for alerts (new), local
+archive 7 days (was 14), validation reports bounded. Steady state ≈ 25 GB.
+
+**Weights:** `python -m centella.fetch_weights` downloads the release assets
+and verifies their SHA-256; the SHA-256 is pinned as the default of
+`CENTELLA_WEIGHTS_SHA256`; a file is never loaded unverified, and only with
+`weights_only=True` (the fallback to `weights_only=False` is gone).
+
+**Validation:** `centella.validate` scores the named baseline
+`aia131_rise` at Centella's false-alarm count and reports the
+low-probability alternation index.
+
+**Repo:** `HelioUSACH/flare-nrt`; `requirements.lock.txt`; `deploy/README.md`
+(internal service polled by the portal); unit limits `MemoryMax=3G`,
+`CPUQuota=200%` for the loop; the API writes only `cache/`. Empty values in
+the environment file mean the default. Resources measured with the real
+weights (INTEGRATION.md): 10.4 s per inference on 2 vCPU, 1.14 GB peak (2.0's
+"0.7 s" was wrong).
+
+**Tests:** a stored real input (`tests/fixtures/snapshot_20261028T1552Z.*`)
+→ known probability with the stand-in and the real weights; the state
+machine (onset, plateau, decay); input age; channel spread; display
+endpoints; retention.
+
+## 2.0.1 (folded into 2.1.0)
 
 - QC: QUALITY bit 30 (0x40000000, quicklook) is no longer a reject. Every near-real-time AIA image has it, so in live mode every slot was `qc_reject` and no probability was ever made.
 - Live source: each `mostrecent/` image is filed (as a copy) under every 2-min slot within 90 s of its T_OBS (the QC time tolerance), not only under floor(T_OBS). Before, images taken late in their slot failed `time_offset` and slots rarely had all 4 channels.

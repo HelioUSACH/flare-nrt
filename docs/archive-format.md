@@ -6,22 +6,25 @@ and re-validated on the data it actually runs on.
 ## Data flow and retention
 
 ```
-JSOC ──► staging/YYYYMMDD/AIA*.fits      raw downloads, every slot     kept ≥ 3 days
+JSOC ──► staging/YYYYMMDD/AIA*.fits      raw downloads, every slot     kept 7 × 24 h
               │  (loop: QC, inference)
               ▼
          results/YYYYMMDD.jsonl            one row per slot, every status   kept 400 days
               │  (curate, daily 04:20 UT, labels from GOES)
               ▼
-         archive/YYYY/MM/DD/               curated windows + labels        kept 14 days on the VM
-              │  (off-VM pull, at least weekly)
+         archive/YYYY/MM/DD/               curated windows + labels        kept 7 days on the server
+              │  (off-server pull, every few days)
               ▼
          long-term archive (another host)  the training set
 ```
 
-Volumes (measured on the 2026-06/07 month): raw synoptic ≈ 0.9 MB per file,
-≈ 2.6 GB per day for 4 channels. Staging steady state ≈ 8–10 GB. Archive
-≈ 0.4 GB (quiet day) to 1.3 GB (very active day). With the defaults the VM
-holds ≲ 25 GB; `CENTELLA_MIN_FREE_GB` (10 GB) is a hard floor (retention.py).
+Volumes: raw synoptic ≈ 0.95 MB per file, 3.8 MB per slot, ≈ 2.75 GB per
+day for 4 channels (measured on the live stream, 2026-10-28; 2.6 GB/day on
+the 2026-06/07 month). Staging steady state ≈ 19 GB (7 days). Archive
+≈ 0.4 GB (quiet day) to 1.3 GB (very active day), but its files are hard
+links into staging (below), so with both kept 7 days it adds ≲ 1.3 GB. The
+whole data directory: INTEGRATION.md "Resources". `CENTELLA_MIN_FREE_GB`
+(10 GB) is a hard floor (retention.py).
 
 Archive files are hard links to the staging copy when on the same
 filesystem, so curation costs no extra space until staging is pruned.
@@ -29,7 +32,8 @@ filesystem, so curation costs no extra space until staging is pruned.
 ## Cleaning rules
 
 1. **Per frame (loop, `qc.py`)**: a slot is rejected if any channel is
-   unreadable, has QUALITY ≠ 0, EXPTIME ≤ 0, the wrong WAVELNTH, > 1 %
+   unreadable, has a QUALITY flag other than bit 30 (quicklook, set on every
+   near-real-time frame), EXPTIME ≤ 0, the wrong WAVELNTH, > 1 %
    non-finite pixels, T_OBS > 90 s from the slot, channels > 120 s apart,
    a blank readout, or a disk median per second of exposure outside
    [0.25, 4]× its recent reference (AIA shortens exposures during flares,
@@ -43,9 +47,10 @@ filesystem, so curation costs no extra space until staging is pruned.
      chosen with a seed fixed by the date.
    Raw files of QC-rejected slots inside a window are kept too (so the
    rule can be revisited); their status says they were rejected.
-3. **What is deleted**: everything else in staging after the day is
-   curated; uncurated staging after 7 days; archive days on the VM after
-   14 days; results after 400 days; oldest first when the disk floor is hit.
+3. **What is deleted**: raw staging files 7 × 24 h after their slot
+   (curation has run six times by then); archive days on the server after
+   7 days; results after 400 days; model-input tensors after 2 days;
+   oldest first when the disk floor is hit (centella/retention.py).
 
 Windows are contiguous so that, for positives and negatives alike, a
 training pair can be built with any baseline age up to 45 min — the
@@ -100,9 +105,9 @@ day folder (or the next/previous one across midnight). Label from
 `phase`/`flare_class` of *t*. Draw the baseline age *a* from the same
 distribution for positives and negatives.
 
-## Off-VM copy
+## Off-server copy
 
-The VM keeps 14 days. Pull at least weekly to the long-term host, e.g.
-`rsync -a --ignore-existing <vm>:/srv/centella/archive/ /path/to/archive/`
+The server keeps 7 days. Pull at least every few days to the long-term host, e.g.
+`rsync -a --ignore-existing <server>:/srv/centella/archive/ /path/to/archive/`
 and check `day.json` hashes after the copy. This is a maintainers' job
 (their backup pattern, not this repo's code).

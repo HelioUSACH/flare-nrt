@@ -11,6 +11,9 @@ EnvironmentFile=/etc/centella/centella.env
 ExecStart=/bin/bash -c '/opt/centella/.venv/bin/python -m centella.validate \
   --start "$(date -u -d "7 days ago" +%%F)" --end "$(date -u -d yesterday +%%F)" \
   --out "/srv/centella/reports/validation_$(date -u +%%F).json"'
+Nice=10
+CPUQuota=100%
+MemoryMax=1G
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/srv/centella
