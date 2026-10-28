@@ -24,7 +24,8 @@ from fastapi import FastAPI, HTTPException, Query, Response
 
 from . import __version__
 from .config import Settings
-from .grid import CHANNELS, day_key, file_name, iso, parse_iso, utcnow
+from .detector import baseline_slots
+from .grid import CHANNELS, day_key, file_name, iso, parse_file_name, parse_iso, utcnow
 from .store import ResultStore, read_events, read_json
 
 
@@ -94,41 +95,63 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         d = cfg.staging_dir / day_key(slot)
         return {w: d / file_name(slot, w) for w in CHANNELS}
 
-    @app.get("/api/channels")
-    def channels():
-        """The 4 channels of the latest result: provider time and whether
-        the image (and its baselines, for the difference) is available."""
+    def _latest_slot(wave: int):
+        """Newest staging slot holding this channel (before the first full
+        result, or when the result's files were already cleaned up)."""
+        best = None
+        for p in cfg.staging_dir.glob(f"*/AIA*_{wave:04d}.fits"):
+            parsed = parse_file_name(p.name)
+            if parsed and (best is None or parsed[0] > best):
+                best = parsed[0]
+        return best
+
+    def _pick(wave: int):
+        """(slot, image path, baseline paths) for one channel: the latest
+        result's slot when its file exists, else the newest file staged."""
         st = read_json(cfg.status_path) or {}
         slot = st.get("observation_time")
-        if not slot:
-            return {"slot": None, "channels": []}
-        files = _slot_files(slot)
-        bls = [_slot_files(b) for b in st.get("baseline_slots") or []]
+        if slot:
+            path = _slot_files(slot)[wave]
+            if path.exists():
+                return parse_iso(slot), path, [_slot_files(b)[wave] for b in st.get("baseline_slots") or []]
+        s = _latest_slot(wave)
+        if s is None:
+            return None, None, []
+        bls = [_slot_files(iso(b))[wave] for b in baseline_slots(s, cfg.lag_min, cfg.n_baseline)]
+        return s, _slot_files(iso(s))[wave], bls
+
+    @app.get("/api/channels")
+    def channels():
+        """The 4 channels: slot and provider time of the image shown, and
+        whether its difference against the baselines is available."""
+        st = read_json(cfg.status_path) or {}
         inputs = st.get("inputs") or {}
-        return {"slot": slot, "baseline_slots": st.get("baseline_slots") or [], "channels": [
-            {"wave": w, "t_obs": inputs.get(str(w)) or inputs.get(w), "image": files[w].exists(),
-             "difference": files[w].exists() and bool(bls) and all(b[w].exists() for b in bls)}
-            for w in CHANNELS]}
+        out = []
+        for w in CHANNELS:
+            s, path, bls = _pick(w)
+            out.append({"wave": w, "slot": iso(s), "t_obs": inputs.get(str(w)) or inputs.get(w),
+                        "image": bool(path and path.exists()),
+                        "difference": bool(path and path.exists() and bls and all(b.exists() for b in bls))})
+        return {"slot": st.get("observation_time"), "baseline_slots": st.get("baseline_slots") or [],
+                "channels": out}
 
     @app.get("/api/image/{wave}.png")
     def image(wave: int, kind: str = Query("img", pattern="^(img|diff)$")):
-        """PNG of one channel of the latest result (``kind=img``) or its
-        difference against the baselines (``kind=diff``), 512 px, north up."""
+        """PNG of one channel (``kind=img``) or its difference against the
+        baselines (``kind=diff``), 512 px, north up. The latest result's slot,
+        or the newest staged image until there is one."""
         from . import render
 
         if wave not in CHANNELS:
             raise HTTPException(404, "unknown channel")
-        st = read_json(cfg.status_path) or {}
-        slot = st.get("observation_time")
-        if not slot:
-            raise HTTPException(404, "no result yet")
+        slot, path, bls = _pick(wave)
+        if slot is None or not path.exists():
+            raise HTTPException(404, "no image yet")
+        if kind == "diff" and (not bls or not all(b.exists() for b in bls)):
+            raise HTTPException(404, "difference not available yet")
         cache_dir = cfg.state_dir / "images"
-        cached = cache_dir / f"{parse_iso(slot):%Y%m%dT%H%M}_{wave}_{kind}.png"
+        cached = cache_dir / f"{slot:%Y%m%dT%H%M}_{wave}_{kind}.png"
         if not cached.exists():
-            path = _slot_files(slot)[wave]
-            bls = [_slot_files(b)[wave] for b in st.get("baseline_slots") or []]
-            if not path.exists() or (kind == "diff" and (not bls or not all(b.exists() for b in bls))):
-                raise HTTPException(404, "image not available")
             png = render.image_png(path, wave) if kind == "img" else render.diff_png(path, bls)
             cache_dir.mkdir(parents=True, exist_ok=True)
             tmp = cached.with_suffix(".tmp")
@@ -138,7 +161,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
                 if time.time() - old.stat().st_mtime > 86400:
                     old.unlink(missing_ok=True)
         return Response(cached.read_bytes(), media_type="image/png",
-                        headers={"Cache-Control": "max-age=60", "X-Observation-Time": slot})
+                        headers={"Cache-Control": "max-age=60", "X-Observation-Time": iso(slot)})
 
     @app.get("/api/health")
     def health():

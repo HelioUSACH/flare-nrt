@@ -174,17 +174,22 @@ class Processor:
         write_json_atomic(self.cfg.loop_state_path, {"last_slot": None, **self.tracker.state()})
 
 
-def should_skip(src, slot: dt.datetime, now: dt.datetime, cfg: Settings) -> bool:
+def should_skip(src, slot: dt.datetime, now: dt.datetime, cfg: Settings,
+                started: dt.datetime | None = None) -> bool:
     """A missing slot is given up after ``give_up_min``, or after
     ``skip_after_min`` if any later slot (up to ``give_up_min`` later) has
     already arrived — one lost file, or a cold start whose first minutes the
-    archive doesn't have, must not hold the whole stream back."""
+    archive doesn't have, must not hold the whole stream back. A slot from
+    before the loop started (``started``) is not waited for at all once a
+    later slot is complete: only the archive could still fill it, and it
+    lags."""
     age = now - slot
+    n_later = int(cfg.give_up_min // 2)
     if age >= dt.timedelta(minutes=cfg.give_up_min):
         return True
-    if age < dt.timedelta(minutes=cfg.skip_after_min):
+    cold = started is not None and slot < floor_slot(started) - dt.timedelta(minutes=cfg.lag_min)
+    if not cold and age < dt.timedelta(minutes=cfg.skip_after_min):
         return False
-    n_later = int(cfg.give_up_min // 2)
     return any(src.paths(slot + k * CADENCE) is not None for k in range(1, n_later + 1))
 
 
@@ -208,7 +213,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Pr
 
     retention = Retention(cfg, every_sec=600 if cfg.staging_hours > 0 else 3600)
     st = read_json(cfg.loop_state_path, {}) or {}
-    now = utcnow()
+    now = started = utcnow()
     nxt = floor_slot(now - dt.timedelta(minutes=20))
     if st.get("last_slot"):
         prev = parse_iso(st["last_slot"])
@@ -220,7 +225,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Pr
         now = utcnow()
         src.refresh(now)
         while nxt <= floor_slot(now):
-            if src.paths(nxt) is None and not should_skip(src, nxt, now, cfg):
+            if src.paths(nxt) is None and not should_skip(src, nxt, now, cfg, started):
                 break  # may still arrive
             try:
                 proc.process(nxt, utcnow())

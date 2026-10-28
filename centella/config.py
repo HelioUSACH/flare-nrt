@@ -31,7 +31,7 @@ class Settings:
     lookback_min: int = field(default_factory=lambda: int(_env("LOOKBACK_MIN", "180")))
     give_up_min: int = field(default_factory=lambda: int(_env("GIVE_UP_MIN", "120")))
     # a slot still missing this long after a later slot has arrived is skipped
-    skip_after_min: int = field(default_factory=lambda: int(_env("SKIP_AFTER_MIN", "20")))
+    skip_after_min: int = field(default_factory=lambda: int(_env("SKIP_AFTER_MIN", "12")))
     http_timeout: float = field(default_factory=lambda: float(_env("HTTP_TIMEOUT", "30")))
     torch_threads: int = field(default_factory=lambda: int(_env("TORCH_THREADS", "4")))
 

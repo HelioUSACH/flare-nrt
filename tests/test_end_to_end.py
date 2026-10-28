@@ -191,3 +191,74 @@ def test_staging_hours_keeps_only_recent_files(cfg):
     Retention(cfg).run(now=new + dt.timedelta(minutes=5))
     left = sorted(p.name for p in cfg.staging_dir.glob("*/AIA*.fits"))
     assert len(left) == 4 and all(f"_{new:%H%M}_" in n for n in left)
+
+
+def test_mostrecent_stands_for_every_slot_within_90s():
+    from centella.source import slots_for
+
+    s = T0
+    assert slots_for(s + dt.timedelta(seconds=10)) == [s]                     # 110 s from the next
+    assert slots_for(s + dt.timedelta(seconds=40)) == [s, s + CADENCE]        # 80 s from the next
+    assert slots_for(s + dt.timedelta(seconds=100)) == [s + CADENCE]          # nearest is the next
+    assert slots_for(s + dt.timedelta(seconds=70)) == [s + CADENCE, s]
+
+
+def test_mostrecent_off_slot_fills_both_slots(cfg, tmp_path):
+    from conftest import write_fits
+
+    from centella.source import LiveSource
+
+    t = T0 + dt.timedelta(seconds=50)       # stands for T0 (50 s) and T0+2 min (70 s)
+    blobs = {}
+    for w in (131, 171, 304, 1600):
+        p = tmp_path / "jsoc" / f"{w}.fits"
+        write_fits(p, w, t)
+        blobs[w] = p.read_bytes()
+
+    class Resp:
+        def __init__(self, code, content=b""):
+            self.status_code, self.content = code, content
+
+    class Session:
+        headers = {}
+
+        def get(self, url, timeout=None):
+            for w, b in blobs.items():
+                if url.endswith(f"/mostrecent/AIAsynoptic{w:04d}.fits"):
+                    return Resp(200, b)
+            return Resp(404)
+
+    live = LiveSource(cfg.staging_dir, "https://example.invalid/synoptic", 10, 5)
+    live.session = Session()
+    assert live.refresh(T0 + dt.timedelta(minutes=5)) == 4
+    assert live.paths(T0) is not None and live.paths(T0 + CADENCE) is not None
+
+
+def test_cold_start_does_not_wait_for_slots_before_start(cfg):
+    from centella.loop import should_skip
+    from centella.source import ReplaySource
+
+    start = T0 + 10 * CADENCE
+    write_slot(cfg.staging_dir, start)
+    src = ReplaySource(cfg.staging_dir)
+    early = start - 5 * CADENCE      # 10 min before start, nothing will fill it
+    assert should_skip(src, early, start + dt.timedelta(minutes=1), cfg, started=start)
+    assert not should_skip(src, early, start + dt.timedelta(minutes=1), cfg)
+
+
+def test_previews_before_the_first_result(cfg):
+    # only an image, no result yet: the image shows, its difference doesn't
+    write_slot(cfg.staging_dir, T0)
+    client = TestClient(create_app(cfg))
+    r = client.get("/api/image/171.png?kind=img")
+    assert r.status_code == 200 and r.headers["X-Observation-Time"] == iso(T0)
+    assert client.get("/api/image/171.png?kind=diff").status_code == 404
+    ch = client.get("/api/channels").json()["channels"]
+    assert all(c["image"] and not c["difference"] for c in ch)
+    # with t−8, −10, −12 staged the difference shows too
+    later = T0 + 6 * CADENCE
+    write_slot(cfg.staging_dir, T0 + CADENCE)
+    write_slot(cfg.staging_dir, T0 + 2 * CADENCE)
+    write_slot(cfg.staging_dir, later)
+    r = client.get("/api/image/171.png?kind=diff")
+    assert r.status_code == 200 and r.headers["X-Observation-Time"] == iso(later)
