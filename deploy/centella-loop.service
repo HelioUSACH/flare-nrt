@@ -11,11 +11,13 @@ Group=centella
 WorkingDirectory=/opt/centella
 EnvironmentFile=/etc/centella/centella.env
 ExecStart=/opt/centella/.venv/bin/python -m centella.loop
+# logs go to stdout/stderr → journald (journalctl -u centella-loop)
 Restart=always
 RestartSec=30
-# CPU budget on a shared VM (docs: INTEGRATION.md "Resources")
+# Budget on the shared server (measured: ~1.2 GB peak RSS, ~21 s CPU per
+# frame on 2 vCPU incl. Grad-CAM; INTEGRATION.md "Resources")
 CPUQuota=200%
-MemoryMax=4G
+MemoryMax=3G
 Nice=5
 NoNewPrivileges=true
 ProtectSystem=strict

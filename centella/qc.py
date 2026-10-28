@@ -33,7 +33,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .grid import parse_datetime
+from .grid import iso_ms, parse_datetime
 
 MAX_NONFINITE = 0.01
 QUICKLOOK_BIT = 1 << 30  # set on all near-real-time AIA frames
@@ -126,7 +126,7 @@ class QualityControl:
                 res.reasons.append(f"nonfinite:{wave}")
             t = _header_time(h)
             if t is not None:
-                res.t_obs[wave] = t.isoformat()
+                res.t_obs[wave] = iso_ms(t)
                 times.append(t)
                 if abs((t - slot).total_seconds()) > MAX_TIME_OFFSET_S:
                     res.reasons.append(f"time_offset:{wave}")

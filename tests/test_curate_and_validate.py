@@ -63,3 +63,25 @@ def test_evaluate_counts_hits_c_runs_and_false_alarms():
     assert rep["mx_evaluable"] == 1 and rep["mx_detected"] == 1
     assert rep["runs_on_mx"] == 1 and rep["runs_on_c"] == 1 and rep["false_alarms"] == 1
     assert rep["flares"][0]["min_from_start"] == 8.0 and rep["flares"][0]["min_from_peak"] == -2.0
+
+
+def test_baseline_rule_at_matched_false_alarms():
+    from centella.validate import aia131_rule
+
+    # 2 h of slots; an M flare at 60–70 min. Centella: alert on it only.
+    # The 131 Å excess: high on the flare, but also a bump at 20 min (no flare).
+    rows = []
+    for i in range(60):
+        t = D + 2 * i * M
+        m = 2 * i
+        ex = 0.5 if 60 <= m <= 66 else (0.3 if m == 20 else 0.01)
+        rows.append({"slot": t.strftime("%Y-%m-%dT%H:%M:%SZ"), "status": "ok", "alert": 60 <= m <= 64,
+                     "probability": 0.9 if 60 <= m <= 64 else 0.1, "aia131_excess": ex})
+    flares = [fl(58, 62, 70, "M2.0")]
+    rep = evaluate(rows, flares)
+    assert rep["mx_detected"] == 1 and rep["false_alarms"] == 0
+    b = aia131_rule(rows, flares, rep["false_alarms"])
+    # with 0 false alarms allowed, k must sit above the 0.3 bump: it still catches the flare
+    assert b["available"] and b["k"] > 0.3 and b["false_alarms"] == 0 and b["mx_detected"] == 1
+    old_rows = [{k: v for k, v in r.items() if k != "aia131_excess"} for r in rows]
+    assert aia131_rule(old_rows, flares, 0)["available"] is False

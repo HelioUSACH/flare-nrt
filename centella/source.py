@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import shutil
+import time
 from pathlib import Path
 
 from .grid import CADENCE, CHANNELS, day_key, file_name, file_url, floor_slot, parse_datetime, parse_file_name
@@ -30,7 +31,8 @@ def slots_for(t: dt.datetime) -> list[dt.datetime]:
 
 
 class LiveSource:
-    def __init__(self, staging_dir: Path, base_url: str, lookback_min: int, timeout: float):
+    def __init__(self, staging_dir: Path, base_url: str, lookback_min: int, timeout: float,
+                 archive_every_sec: float = 600, archive_budget_sec: float = 20):
         import requests
 
         self.dir = Path(staging_dir)
@@ -40,7 +42,10 @@ class LiveSource:
         self.session = requests.Session()
         self.session.headers["User-Agent"] = "Centella (HelioUSACH)"
         self.last_download: dt.datetime | None = None
-        self._missed: dict[Path, dt.datetime] = {}  # 404s: retry at most every 5 min
+        self._missed: dict[Path, dt.datetime] = {}  # 404s: retry at most every 30 min
+        self.archive_every = dt.timedelta(seconds=archive_every_sec)
+        self.archive_budget = archive_budget_sec
+        self._last_archive: dt.datetime | None = None
 
     def path_for(self, slot: dt.datetime, wave: int) -> Path:
         return self.dir / day_key(slot) / file_name(slot, wave)
@@ -52,10 +57,15 @@ class LiveSource:
         n = 0
         for w in CHANNELS:
             url = f"{self.base}/mostrecent/AIAsynoptic{w:04d}.fits"
-            try:
-                r = self.session.get(url, timeout=self.timeout)
-            except Exception as e:
-                log.warning("mostrecent %d failed: %s", w, e)
+            r = None
+            for attempt in (1, 2):  # JSOC drops a connection now and then: retry once
+                try:
+                    r = self.session.get(url, timeout=self.timeout)
+                    break
+                except Exception as e:
+                    if attempt == 2:
+                        log.warning("mostrecent %d failed twice: %s", w, e)
+            if r is None:
                 continue
             if r.status_code != 200 or not r.content:
                 log.warning("mostrecent %d: HTTP %s", w, r.status_code)
@@ -87,23 +97,34 @@ class LiveSource:
         return n
 
     def refresh(self, now: dt.datetime) -> int:
-        """Newest images first, then every missing file of [now − lookback,
-        now] from the dated archive. Network errors are logged and retried
-        on the next poll, never raised."""
+        """Newest images every poll; the dated archive (which lags real time)
+        only every ``archive_every`` and for at most ``archive_budget``
+        seconds, newest gap first. Network errors are logged and retried on
+        a later poll, never raised."""
         n = self.refresh_mostrecent()
-        s, end = floor_slot(now - self.lookback), floor_slot(now)
-        while s <= end:
+        if self._last_archive and now - self._last_archive < self.archive_every:
+            return n
+        self._last_archive = now
+        return n + self.refresh_archive(now)
+
+    def refresh_archive(self, now: dt.datetime) -> int:
+        n = 0
+        t0 = time.monotonic()
+        s, end = floor_slot(now - CADENCE), floor_slot(now - self.lookback)
+        while s >= end:
             for w in CHANNELS:
+                if time.monotonic() - t0 > self.archive_budget:
+                    return n
                 p = self.path_for(s, w)
                 if p.exists():
                     continue
                 miss = self._missed.get(p)
-                if miss and now - miss < dt.timedelta(minutes=5):
+                if miss and now - miss < dt.timedelta(minutes=30):
                     continue
                 try:
                     r = self.session.get(file_url(self.base, s, w), timeout=self.timeout)
-                except Exception as e:  # network down: try again next poll
-                    log.warning("download failed %s: %s", p.name, e)
+                except Exception as e:  # network down: try again next pass
+                    log.warning("archive download failed %s: %s", p.name, e)
                     return n
                 if r.status_code == 200 and r.content:
                     p.parent.mkdir(parents=True, exist_ok=True)
@@ -115,7 +136,7 @@ class LiveSource:
                     self._missed.pop(p, None)
                 else:
                     self._missed[p] = now
-            s += CADENCE
+            s -= CADENCE
         cutoff = now - 2 * self.lookback
         self._missed = {k: v for k, v in self._missed.items() if v > cutoff}
         return n
@@ -123,6 +144,9 @@ class LiveSource:
     def paths(self, slot: dt.datetime) -> dict[int, Path] | None:
         ps = {w: self.path_for(slot, w) for w in CHANNELS}
         return ps if all(p.exists() for p in ps.values()) else None
+
+    def missing_channels(self, slot: dt.datetime) -> list[int]:
+        return [w for w in CHANNELS if not self.path_for(slot, w).exists()]
 
 
 class ReplaySource:
@@ -140,3 +164,7 @@ class ReplaySource:
     def paths(self, slot: dt.datetime) -> dict[int, Path] | None:
         d = self.frames.get(slot)
         return d if d and all(w in d for w in CHANNELS) else None
+
+    def missing_channels(self, slot: dt.datetime) -> list[int]:
+        d = self.frames.get(slot) or {}
+        return [w for w in CHANNELS if w not in d]

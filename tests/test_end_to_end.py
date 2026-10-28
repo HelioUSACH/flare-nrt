@@ -26,6 +26,7 @@ def _make_day(cfg, n=16, bad=(5,), flare_from=12):
 
 def test_replay_produces_consistent_outputs(cfg):
     slots = _make_day(cfg)
+    cfg.min_baseline = 3  # the validated rule: all 3 baseline frames
     cfg.threshold = 0.0  # stand-in weights: force alerts to exercise events
     proc = run(cfg, replay_dir=cfg.staging_dir)
     rows = ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}")
@@ -47,6 +48,19 @@ def test_replay_produces_consistent_outputs(cfg):
     assert len(evs) >= 1 and evs[-1]["n_alert_frames"] >= 1
     st = read_json(cfg.status_path)
     assert st["observation_time"] == ok[-1]["slot"] and st["threshold"] == 0.0
+    assert {r["state"] for r in rows} <= {"quiet", "onset", "active", "decay"}
+
+
+def test_two_of_three_baselines_keep_the_slot(cfg):
+    slots = _make_day(cfg)          # slot 5 is rejected by QC
+    run(cfg, replay_dir=cfg.staging_dir)   # default min_baseline = 2
+    by = {r["slot"]: r for r in ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}")}
+    for i in (9, 10, 11):
+        r = by[iso(slots[i])]
+        assert r["status"] == "ok" and r["n_baseline_used"] == 2
+        assert r["baseline_missing"] == [iso(slots[5])]
+    assert by[iso(slots[12])]["n_baseline_used"] == 3
+    assert by[iso(slots[4])]["status"] == "no_baseline"    # only 1 of 3
 
 
 def test_replay_is_deterministic(cfg, tmp_path):
@@ -74,13 +88,23 @@ def test_api_contract_and_freshness(cfg):
     # the synthetic slots are days old: a running loop on old inputs is stale too
     assert s["live_status"] == "stale" and s["stale_reason"] == "inputs_old"
     st = read_json(cfg.status_path)
-    write_json_atomic(cfg.status_path, dict(st, observation_time=now))
+    assert all(v.endswith("Z") for v in st["inputs"].values())        # provider T_OBS, UTC Z
+    write_json_atomic(cfg.status_path, dict(st, observation_time=now, inputs={w: now for w in st["inputs"]}))
     s = client.get("/api/status").json()
-    assert s["live_status"] == "live"
-    for k in ("timestamp", "probability", "flare_detected", "location", "ensemble_std",
-              "seconds_since_update", "threshold", "observation_time", "model_version", "model"):
+    assert s["live_status"] == "live" and s["input_age_s"] < 60
+    # the portal's adapter reads these (D-096) …
+    for k in ("live_status", "timestamp", "probability", "flare_detected", "location", "ensemble_std",
+              "seconds_since_update"):
         assert k in s
-    assert s["timestamp"].endswith("Z") and s["model"] == "Centella"
+    # … and these are the 2.1 contract (INTEGRATION.md)
+    for k in ("state", "raw_score", "alert", "threshold", "observation_time", "inputs", "input_age_s",
+              "max_input_age_sec", "last_frame", "baseline_slots", "n_baseline_used", "model",
+              "model_version", "weights_sha256", "server_time"):
+        assert k in s, k
+    assert s["state"] in {"quiet", "onset", "active", "decay"}
+    assert s["timestamp"].endswith("Z") and s["server_time"].endswith("Z") and s["model"] == "Centella"
+    assert {"slot", "status", "reason", "inputs"} <= set(s["last_frame"])
+    assert "severity" not in s            # never sent (exploratory in 1.x, removed)
     assert client.get("/api/events").status_code == 200
     assert "points" in client.get("/api/results?hours=168").json()
     assert "coverage_24h" in client.get("/api/health").json()
@@ -97,6 +121,11 @@ def test_live_status_rules():
     assert live_status(None, hb, now, 600)[0] == "no_data"
     late = dict(st, observation_time="2026-10-20T10:30:00Z")
     assert live_status(late, hb, now, 600)[:2] == ("stale", "inputs_old")
+    # the newest provider T_OBS decides, 900 s by default (15 min)
+    fresh = dict(st, inputs={"131": "2026-10-20T11:46:00.000Z", "171": "2026-10-20T11:44:00.000Z"})
+    assert live_status(fresh, hb, now, 600)[0] == "live"                # 14 min
+    old_in = dict(st, inputs={"131": "2026-10-20T11:44:00.000Z", "171": "2026-10-20T11:44:30.000Z"})
+    assert live_status(old_in, hb, now, 600)[:2] == ("stale", "inputs_old")   # 15.5 min
 
 
 def test_missing_slot_is_skipped_once_later_slots_arrive(cfg):
@@ -262,3 +291,70 @@ def test_previews_before_the_first_result(cfg):
     write_slot(cfg.staging_dir, later)
     r = client.get("/api/image/171.png?kind=diff")
     assert r.status_code == 200 and r.headers["X-Observation-Time"] == iso(later)
+
+
+def test_retention_keeps_7_days_of_fits_2_of_tensors(cfg):
+    from centella.retention import Retention
+
+    now = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.timezone.utc)
+
+    def touch(p):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return p
+
+    keep, drop = [], []
+    for days in (0, 7, 8):
+        d = now - dt.timedelta(days=days)
+        (keep if days <= 7 else drop).append(touch(cfg.staging_dir / f"{d:%Y%m%d}" / f"AIA{d:%Y%m%d}_1200_0131.fits"))
+    for days in (2, 3):
+        d = now - dt.timedelta(days=days)
+        (keep if days <= 2 else drop).append(touch(cfg.tensors_dir / f"{d:%Y%m%d}" / "1200.npz"))
+        (keep if days <= 2 else drop).append(touch(cfg.gradcam_dir / f"{d:%Y%m%d}" / "1200.png"))
+        keep.append(touch(cfg.gradcam_dir / f"{d:%Y%m%d}" / "1202_alert.png"))   # alerts: 400 days
+    Retention(cfg).run(now=now)
+    assert all(p.exists() for p in keep) and not any(p.exists() for p in drop)
+
+
+def test_display_endpoints(cfg):
+    """What the portal will show: recent frames, AIA images per slot,
+    Grad-CAM (latest and per slot), the probability series, events."""
+    from io import BytesIO
+
+    from PIL import Image
+
+    from centella.loop import Processor
+    from centella.model import Ensemble
+    from centella.source import ReplaySource
+
+    now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
+    t0 = now - dt.timedelta(minutes=now.minute % 2) - 9 * CADENCE
+    slots = [t0 + i * CADENCE for i in range(10)]
+    for s in slots:
+        write_slot(cfg.staging_dir, s)
+    cfg.threshold = 0.0   # every ok frame alerts: exercises the alert Grad-CAM too
+    proc = Processor(cfg, Ensemble.load(cfg.weights, cfg.weights_sha256), ReplaySource(cfg.staging_dir), live=True)
+    for s in slots:
+        proc.process(s, s + dt.timedelta(minutes=1))
+    write_json_atomic(cfg.state_dir / "heartbeat.json", {"heartbeat": iso(now)})
+    c = TestClient(create_app(cfg))
+
+    fr = c.get("/api/frames?hours=1").json()["frames"]
+    assert [f["slot"] for f in fr] == [iso(s) for s in slots]
+    ok = [f for f in fr if f["status"] == "ok"]
+    assert ok and all(f["images"] == [131, 171, 304, 1600] and f["gradcam"] for f in ok)
+    assert (cfg.tensors_dir / f"{slots[-1]:%Y%m%d}" / f"{slots[-1]:%H%M}.npz").exists()
+
+    for url in (f"/api/image/171.png?slot={ok[0]['slot']}", f"/api/image/171.png?slot={ok[0]['slot']}&kind=diff",
+                "/api/gradcam/latest.png", f"/api/gradcam/{ok[0]['slot']}.png"):
+        r = c.get(url)
+        assert r.status_code == 200, url
+        assert Image.open(BytesIO(r.content)).size == (512, 512)
+    assert c.get("/api/gradcam/latest.png").headers["X-Observation-Time"] == iso(slots[-1])
+    assert c.get(f"/api/gradcam/{iso(slots[0])}.png").status_code == 404     # no baseline → no result
+    assert c.get("/api/image/171.png?slot=yesterday").status_code == 422
+
+    se = c.get("/api/series?days=1").json()
+    assert se["fields"] == ["slot", "probability", "state", "status"] and len(se["points"]) == 10
+    ev = c.get("/api/events").json()["events"]
+    assert ev and ev[-1]["gradcam"] and c.get(ev[-1]["gradcam"]).status_code == 200

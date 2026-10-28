@@ -1,78 +1,95 @@
-# Centella
+# flare-nrt — Centella
 
-Near-real-time solar flare detection on SDO/AIA synoptic images, producer
-of the `usach.flare.nrt` product of
-[Clima Espacial USACH](https://github.com/HelioUSACH/clima-espacial).
-Integration contract: [`INTEGRATION.md`](INTEGRATION.md). Model card:
-[`docs/model-card.md`](docs/model-card.md). Archive for retraining:
-[`docs/archive-format.md`](docs/archive-format.md).
+**Centella** detects solar flares in near real time on SDO/AIA synoptic
+images. It produces the `usach.flare.nrt` product of
+[Clima Espacial USACH](https://github.com/HelioUSACH/clima-espacial). It
+runs as an internal service on the portal's server, and the portal polls
+it on `127.0.0.1:5050`.
 
-## Install (Ubuntu 24.04, no GPU)
+- Integration sheet and HTTP contract: [`INTEGRATION.md`](INTEGRATION.md)
+- Model card: [`docs/model-card.md`](docs/model-card.md)
+- Deployment on the portal's server: [`deploy/README.md`](deploy/README.md)
+- Archive for retraining: [`docs/archive-format.md`](docs/archive-format.md)
+
+The steps below work on a fresh Ubuntu 24.04 machine with no GPU, in this
+order.
+
+## 1. Install
 
 ```bash
+sudo apt install python3-venv          # once, if missing
+git clone https://github.com/HelioUSACH/flare-nrt.git && cd flare-nrt
 python3 -m venv .venv && . .venv/bin/activate
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-pip install -r requirements-dev.txt      # or: pip install -r requirements.lock.txt
+pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
+pip install -r requirements.lock.txt   # exact versions (ranges: requirements.txt)
+pip install -e . --no-deps
 ```
 
-## Weights
-
-Download `deployment_ensemble_thr058.pt` and `global_norm_stats.json` from
-the GitHub release of the tag you deploy, then:
+## 2. Fetch the weights
 
 ```bash
-sha256sum deployment_ensemble_thr058.pt     # must match the release notes
-export CENTELLA_WEIGHTS=$PWD/deployment_ensemble_thr058.pt
-export CENTELLA_WEIGHTS_SHA256=<that hash>
-export CENTELLA_NORM_STATS=$PWD/global_norm_stats.json
-export CENTELLA_DATA_DIR=$PWD/var
+python -m centella.fetch_weights       # → models/ and metadata/, SHA-256 verified
 ```
 
-## Run
+This downloads two files from the GitHub release:
+`deployment_ensemble_thr058.pt` (214 MB) and `global_norm_stats.json`.
+Their SHA-256 is pinned in `centella/fetch_weights.py`. The default of
+`CENTELLA_WEIGHTS_SHA256` is the same value, so the service refuses any
+other file. A file is loaded with `torch.load(weights_only=True)` only
+after its hash checks.
+
+## 3. Run
 
 ```bash
-python -m centella.loop                       # live loop (downloads from JSOC)
-uvicorn centella.server:app --host 127.0.0.1 --port 5050
-python -m centella.curate                     # daily: archive + labels + retention
-python -m centella.validate --start 2026-10-27 --end 2026-11-02
+python -m centella.loop                                    # live loop (JSOC mostrecent/)
+uvicorn centella.server:app --host 127.0.0.1 --port 5050   # the API the portal polls
+curl -s 127.0.0.1:5050/api/status                          # live_status, state, probability …
 ```
 
-Replay existing FITS through the same code path (validation):
+Default paths are relative to the working directory: `./var` for data,
+`./models` and `./metadata` for the model files. Every path and parameter
+is an environment variable (`.env.example`). Logs go to stdout/stderr.
+
+Other jobs:
 
 ```bash
-python -m centella.loop --replay /path/to/fits --data-dir /tmp/replay
+python -m centella.curate                                  # daily: archive + labels + retention
+python -m centella.validate --start 2026-10-21 --end 2026-10-27   # vs GOES and vs the baseline rule
+python -m centella.loop --replay /path/to/fits             # replay stored FITS through the same code
 ```
 
-Configuration is environment only (`.env.example`); every path is a
-setting. On the server the units in `deploy/` run it (maintainers install
-them).
-
-## Test
+## 4. Test
 
 ```bash
 ruff check .
-pytest            # offline, CPU, < 1 min; uses a tiny stand-in ensemble
+pytest                                                      # offline, CPU, ~3 min
+CENTELLA_REAL_WEIGHTS=models/deployment_ensemble_thr058.pt pytest tests/test_snapshot.py
 ```
 
-`tests/test_real_weights.py` checks the real weights against a stored slot
-when `CENTELLA_REAL_*` is set (see its docstring).
+The plain `pytest` run uses a tiny stand-in ensemble. The second command
+checks the real weights against a stored real input
+(`tests/fixtures/snapshot_20261028T1552Z.*`): the probability must match
+to 1e-4.
 
 ## Training code
 
-Not in this repository yet: the network was trained with the thesis
-pipeline (AIA level-1; docs/model-card.md "Training data").
-Retraining on the archive this service builds is the next step
-(docs/archive-format.md "Building a training set").
+The training code is not in this repository. The network was trained with
+the thesis pipeline on AIA level-1 images: solar cycle 24 for training,
+2019–2022 for validation and 2023–2025 for testing (docs/model-card.md,
+"Training data"). Retraining on the archive this service builds
+(docs/archive-format.md) is the next step.
 
 ## Layout
 
 ```
-centella/  config, grid (2-min slots), source (JSOC/replay), qc, preprocess,
-            model (ensemble + SHA-256), detector (baseline, alert, events),
-            localize, loop, store, server, curate, goes, retention, validate
-deploy/     example systemd units
-docs/       model card, archive format
-tests/      offline tests with synthetic FITS
+centella/  config, grid (2-min slots), source (JSOC), qc, preprocess,
+           model (ensemble, SHA-256, Grad-CAM), detector (baseline, alert,
+           events), loop, artifacts (tensors, Grad-CAM), localize, render,
+           server (HTTP), store, retention, curate, goes, validate,
+           fetch_weights
+deploy/    systemd units and the deployment note
+docs/      model card, archive format
+tests/     offline tests; fixtures/ holds one real model input
 ```
 
 Licence: Apache-2.0. Data products: CC BY 4.0.

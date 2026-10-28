@@ -1,6 +1,9 @@
 """Ensemble of 5 ResNet-18 (8 input channels, one logit); output = mean of the
 members' sigmoids. The weights file is verified against its SHA-256 before
-loading."""
+``torch.load(weights_only=True)``; an unverified or non-tensor file is refused.
+
+``gradcam`` explains one input: Grad-CAM (Selvaraju et al. 2017) on each
+member's last block (``layer4``), averaged over the members, at 512 px."""
 
 from __future__ import annotations
 
@@ -63,14 +66,12 @@ class Ensemble:
         if expected_sha256 and digest != expected_sha256.lower():
             raise WeightsError(f"SHA-256 mismatch for {path.name}: {digest}")
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        if not expected_sha256:
+            raise WeightsError("set CENTELLA_WEIGHTS_SHA256: weights are never loaded unverified")
         try:
             ckpt = torch.load(path, map_location="cpu", weights_only=True)
-        except Exception:
-            # Older checkpoints carry numpy scalars in their metadata. Only
-            # reached after the SHA-256 check above has passed.
-            if not expected_sha256:
-                raise WeightsError("checkpoint needs weights_only=False; set CENTELLA_WEIGHTS_SHA256") from None
-            ckpt = torch.load(path, map_location="cpu", weights_only=False)
+        except Exception as e:
+            raise WeightsError(f"{path.name} is not a plain-tensor checkpoint: {e}") from None
         members = []
         for i, entry in enumerate(ckpt["ensemble_members"]):
             net = build_member()
@@ -89,3 +90,27 @@ class Ensemble:
         xb = x.float().unsqueeze(0).to(self.device)
         scores = [float(torch.sigmoid(m(xb)).squeeze()) for m in self.members]
         return float(sum(scores) / len(scores)), scores
+
+    def gradcam(self, x: torch.Tensor) -> torch.Tensor:
+        """x: (8, 512, 512) → (512, 512) float32 in [0, 1], mean over members
+        of ReLU(Σ_k w_k A_k) on layer4, w_k = spatial mean of ∂logit/∂A_k,
+        each member's map scaled to its own maximum. Same row order as x
+        (FITS: row 0 = south)."""
+        xb = x.float().unsqueeze(0).to(self.device)
+        maps = []
+        for m in self.members:
+            acts = {}
+            h = m.layer4.register_forward_hook(lambda _m, _i, o, acts=acts: acts.__setitem__("a", o))
+            try:
+                with torch.enable_grad():
+                    logit = m(xb).squeeze()
+                    a = acts["a"]
+                    (g,) = torch.autograd.grad(logit, a)
+            finally:
+                h.remove()
+            w = g.mean(dim=(2, 3), keepdim=True)
+            cam = torch.relu((w * a).sum(1, keepdim=True)).detach()
+            cam = torch.nn.functional.interpolate(cam, size=x.shape[-2:], mode="bilinear", align_corners=False)[0, 0]
+            mx = float(cam.max())
+            maps.append(cam / mx if mx > 0 else cam)
+        return torch.stack(maps).mean(0).cpu()

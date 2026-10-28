@@ -1,6 +1,6 @@
 [project]
 name = "centella"
-version = "2.0.0"
+version = "2.1.0"
 description = "Near-real-time solar flare detection on SDO/AIA synoptic images (HelioUSACH)"
 readme = "README.md"
 requires-python = ">=3.10"

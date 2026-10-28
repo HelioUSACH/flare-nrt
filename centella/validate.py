@@ -10,6 +10,12 @@
   [tstart − 10 min, tpeak].
 
     python -m centella.validate --start 2026-10-27 --end 2026-11-03 [--flares-csv F.csv]
+
+The report also scores the named baseline, ``aia131_rise``: no network, the
+same input frames — alert when the disk-integrated 131 Å count rate is up by
+≥ k over the same baseline frames (``aia131_excess`` in each result row),
+with k the lowest value whose false alarms on the period do not exceed
+Centella's. Same rules, same flares: the difference is what the network adds.
 """
 
 from __future__ import annotations
@@ -83,6 +89,32 @@ def evaluate(rows: list[dict], flares: list[Flare], merge_gap_min: int = 10) -> 
     }
 
 
+def aia131_rule(rows: list[dict], flares: list[Flare], max_false_alarms: int, merge_gap_min: int = 10) -> dict:
+    """The baseline at matched false alarms (see the module docstring)."""
+    xs = sorted({r["aia131_excess"] for r in rows if r.get("status") == "ok" and r.get("aia131_excess") is not None},
+                reverse=True)
+    if not xs:
+        return {"rule": "aia131_rise", "available": False,
+                "why": "no aia131_excess in these rows (results from before 2.1.0: replay again)"}
+    best = None
+    lo, hi = 0, min(len(xs), 5000) - 1      # FA grows as k falls: binary search on the sorted values
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        k = xs[mid]
+        rep = evaluate([dict(r, alert=r.get("status") == "ok" and (r.get("aia131_excess") or -1) >= k) for r in rows],
+                       flares, merge_gap_min)
+        if rep["false_alarms"] <= max_false_alarms:
+            best, lo = (k, rep), mid + 1
+        else:
+            hi = mid - 1
+    if best is None:
+        return {"rule": "aia131_rise", "available": True, "k": None, "why": "no k reaches that false-alarm count"}
+    k, rep = best
+    return {"rule": "aia131_rise", "available": True, "k": k,
+            **{key: rep[key] for key in ("mx_evaluable", "mx_detected", "pod_mx", "pod_ge_m2", "pod_m1_m2",
+                                         "false_alarms", "median_min_from_start", "median_min_from_peak")}}
+
+
 def _pod(ps):
     return round(sum(p["detected"] for p in ps) / len(ps), 3) if ps else None
 
@@ -108,6 +140,7 @@ def main(argv=None) -> int:
         d += dt.timedelta(days=1)
     flares = read_csv(Path(a.flares_csv)) if a.flares_csv else fetch_swpc(cfg.goes_url)
     rep = evaluate(rows, flares, cfg.merge_gap_min)
+    rep["baseline"] = aia131_rule(rows, flares, rep["false_alarms"], cfg.merge_gap_min)
     txt = json.dumps(rep, indent=2)
     if a.out:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)

@@ -12,7 +12,7 @@ import torch
 
 from centella.config import Settings
 from centella.grid import CHANNELS, file_name
-from centella.model import build_member
+from centella.model import build_member, sha256
 
 T0 = dt.datetime(2026, 10, 20, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -72,8 +72,9 @@ def cfg(tmp_path, stand_in_weights, norm_stats):
     c = Settings()
     c.data_dir = tmp_path / "var"
     c.weights = stand_in_weights
-    c.weights_sha256 = ""
+    c.weights_sha256 = sha256(stand_in_weights)
     c.norm_stats = norm_stats
     c.torch_threads = 1
+    c.min_free_gb = 0  # the disk guard is tested on its own, never by accident
     c.ensure_dirs()
     return c

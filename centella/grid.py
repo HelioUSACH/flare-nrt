@@ -25,6 +25,14 @@ def floor_slot(t: dt.datetime) -> dt.datetime:
     return t.replace(minute=t.minute - t.minute % 2, second=0, microsecond=0)
 
 
+def iso_ms(t: dt.datetime | None) -> str | None:
+    """ISO 8601 UTC with Z, to the millisecond (provider timestamps)."""
+    if t is None:
+        return None
+    t = as_utc(t)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.") + f"{t.microsecond // 1000:03d}Z"
+
+
 def iso(t: dt.datetime | None) -> str | None:
     """ISO 8601 UTC with Z, to the second."""
     if t is None:
