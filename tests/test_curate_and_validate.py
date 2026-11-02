@@ -97,3 +97,42 @@ def test_alternation_index():
     assert alternation(rows([0.05, 0.15] * 10))["reversal_fraction"] == 1.0
     assert alternation(rows([0.05 + 0.01 * i for i in range(20)]))["pairs"] == 0      # steps < 0.02
     assert alternation(rows([0.05 + 0.03 * i for i in range(8)]))["reversal_fraction"] == 0.0
+
+
+def test_hek_flare_list(monkeypatch, tmp_path):
+    """HEK's column search, paged (``overmax``); entries without a class dropped."""
+    import requests
+
+    from centella import goes
+
+    pages = [
+        {"overmax": True, "result": [
+            {"event_starttime": "2026-07-04T11:38:00", "event_peaktime": "2026-07-04T11:52:00",
+             "event_endtime": "2026-07-04T12:10:00", "fl_goescls": "M2.3"},
+            {"event_starttime": "2026-07-04T10:20:00", "event_peaktime": "2026-07-04T10:26:00",
+             "event_endtime": "2026-07-04T10:34:00", "fl_goescls": ""}]},
+        {"overmax": False, "result": [
+            {"event_starttime": "2026-07-05T01:00:00", "event_peaktime": "2026-07-05T01:04:00",
+             "event_endtime": "2026-07-05T01:09:00", "fl_goescls": "C1.1"}]},
+    ]
+    seen = []
+
+    class R:
+        def __init__(self, js):
+            self.js = js
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.js
+
+    def get(url, params, **kw):
+        seen.append(params["page"])
+        return R(pages[params["page"] - 1])
+
+    monkeypatch.setattr(requests, "get", get)
+    out = tmp_path / "f.csv"
+    goes.main(["--start", "2026-07-04", "--end", "2026-07-05", "--out", str(out)])
+    assert seen == [1, 2]
+    assert [f.fclass for f in goes.read_csv(out)] == ["M2.3", "C1.1"]

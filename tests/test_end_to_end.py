@@ -358,3 +358,56 @@ def test_display_endpoints(cfg):
     assert se["fields"] == ["slot", "probability", "state", "status"] and len(se["points"]) == 10
     ev = c.get("/api/events").json()["events"]
     assert ev and ev[-1]["gradcam"] and c.get(ev[-1]["gradcam"]).status_code == 200
+
+
+def test_retrospective_viewer(cfg, tmp_path):
+    """A past period replayed from FITS kept elsewhere (CENTELLA_FITS_DIRS),
+    browsed by date: range, series/events/flares windows, one frame's
+    detail, its images, the alert Grad-CAM, the viewer page."""
+    fits = tmp_path / "month"
+    slots = [T0 + i * CADENCE for i in range(12)]
+    for i, s in enumerate(slots):
+        write_slot(fits, s, flare=400.0 if i >= 8 else 0.0)
+    cfg.fits_dirs = [fits]
+    flares = tmp_path / "flares.csv"
+    flares.write_text("tstart,tpeak,tend,fclass\n2026-10-20T12:14:00Z,2026-10-20T12:20:00Z,2026-10-20T12:30:00Z,M1.5\n"
+                      "2026-10-19T03:00:00Z,2026-10-19T03:05:00Z,2026-10-19T03:10:00Z,B5.0\n")
+    cfg.flares_csv = str(flares)
+    cfg.threshold = 0.0                      # stand-in weights: every ok frame alerts
+    run(cfg, replay_dir=fits)
+    rows = ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}")
+    assert all("input_age_s" not in r for r in rows)          # meaningless in a replay
+    ok = [r for r in rows if r["status"] == "ok"]
+    assert not any(cfg.tensors_dir.rglob("*.npz"))              # replay keeps no tensors …
+    assert all((cfg.gradcam_dir / f"{T0:%Y%m%d}" / f"{parse_iso(r['slot']):%H%M}_alert.png").exists() for r in ok)
+
+    c = TestClient(create_app(cfg))
+    rg = c.get("/api/range").json()
+    assert (rg["first"], rg["last"]) == (iso(slots[0]), iso(slots[-1]))
+    win = f"start={iso(T0)}&end={iso(slots[-1])}"
+    assert len(c.get("/api/series?" + win).json()["points"]) == 12
+    assert c.get("/api/events?" + win).json()["events"]
+    fl = c.get("/api/flares?" + win).json()["flares"]
+    assert [f["class"] for f in fl] == ["M1.5"]                 # B flares and other days left out
+    assert c.get(f"/api/series?start={iso(T0)}&end={iso(T0 + dt.timedelta(days=41))}").status_code == 422
+    assert c.get(f"/api/series?start={iso(slots[3])}&end={iso(slots[2])}").status_code == 422
+
+    d = c.get(f"/api/frame/{ok[-1]['slot']}").json()
+    assert d["row"]["probability"] == ok[-1]["probability"]
+    assert d["images"] == [131, 171, 304, 1600] and d["differences"] == [131, 171, 304, 1600] and d["gradcam"]
+    assert c.get(f"/api/frame/{iso(slots[0])}").json()["differences"] == []   # no baselines before it
+    for kind in ("img", "diff"):                                 # rendered from the FITS in fits_dirs
+        assert c.get(f"/api/image/304.png?slot={ok[-1]['slot']}&kind={kind}").status_code == 200
+    assert c.get(f"/api/gradcam/{ok[-1]['slot']}.png").status_code == 200
+    page = c.get("/viewer")
+    assert page.status_code == 200 and "visor retrospectivo" in page.text and 'fetch(path)' in page.text
+
+
+def test_replay_resume_skips_done_slots(cfg, tmp_path):
+    fits = tmp_path / "f"
+    for i in range(8):
+        write_slot(fits, T0 + i * CADENCE)
+    run(cfg, replay_dir=fits, replay_gradcam=False)
+    n = len(ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}"))
+    proc = run(cfg, replay_dir=fits, replay_gradcam=False, resume=True)
+    assert proc.frame_count == 0 and len(ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}")) == n == 8

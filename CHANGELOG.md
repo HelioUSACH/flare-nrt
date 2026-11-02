@@ -1,5 +1,29 @@
 # Changelog
 
+## 2.2.0 — 2026-11-02
+
+Retrospective viewer and past-period replays. `/api/status` is unchanged.
+
+- `GET /viewer`: an internal page for browsing any period frame by frame.
+  It has a probability timeline with threshold, events, GOES flares and
+  gaps (zoom, pan, click to jump), the 4 channels as images or
+  differences, the Grad-CAM, the frame's row, and lists of events vs GOES
+  flares. Playback at 1–8 frames/s, keyboard steps, and links that reopen
+  the same frame (docs/viewer.md).
+- New endpoints: `/api/range`, `/api/frame/{slot}`, `/api/flares`.
+  `/api/series`, `/api/events` and `/api/frames` take `start`/`end` for any
+  past window (series up to 40 days).
+- `CENTELLA_FITS_DIRS`: the API also finds FITS by name in these
+  read-only trees, so a replayed month is browsed without copying it.
+  `CENTELLA_FLARES_CSV`: the GOES list shown by the viewer (default: the
+  curated archive's).
+- Replay (`--replay`) keeps the Grad-CAM of every alerting frame (no
+  tensors; `--no-gradcam` to skip), logs progress every 12 h of data, and
+  `--resume` continues after a stop. Replay rows no longer carry
+  `input_age_s`, which is only meaningful live.
+- `python -m centella.goes --start --end --out`: the SWPC flare list of a
+  past period, from HEK.
+
 ## 2.1.0 — 2026-10-28
 
 Ready for integration into the portal (`docs/models/CONTRIBUTING-A-MODEL.md`

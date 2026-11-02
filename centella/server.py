@@ -28,13 +28,17 @@ from __future__ import annotations
 import datetime as dt
 import shutil
 import time
+from importlib import resources
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi.responses import HTMLResponse
 
 from . import __version__
 from .artifacts import gradcam_path
 from .config import Settings
 from .detector import baseline_slots
+from .goes import class_flux, read_csv
 from .grid import CADENCE, CHANNELS, day_key, file_name, iso, parse_datetime, parse_file_name, parse_iso, utcnow
 from .store import ResultStore, read_events, read_json
 
@@ -75,10 +79,20 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     cfg = cfg or Settings()
     app = FastAPI(title="Centella", version=__version__)
 
-    def _rows(since: dt.datetime, now: dt.datetime) -> list[dict]:
+    def _rows(since: dt.datetime, until: dt.datetime) -> list[dict]:
         store = ResultStore(cfg.results_dir)
-        days = sorted({day_key(since + dt.timedelta(days=i)) for i in range((now - since).days + 2)})
-        return [r for d in days for r in store.read_day(d) if parse_iso(r["slot"]) >= since]
+        days = sorted({day_key(since + dt.timedelta(days=i)) for i in range((until - since).days + 2)})
+        return [r for d in days for r in store.read_day(d) if since <= parse_iso(r["slot"]) <= until]
+
+    def _window(start: str | None, end: str | None, default_days: float, max_days: float):
+        """(since, until) from optional ISO ``start``/``end``; without them the
+        last ``default_days`` up to now. Longer than ``max_days`` → 422."""
+        until = _slot_param(end) if end else (
+            _slot_param(start) + dt.timedelta(days=default_days) if start else utcnow())
+        since = _slot_param(start) if start else until - dt.timedelta(days=default_days)
+        if until <= since or until - since > dt.timedelta(days=max_days):
+            raise HTTPException(422, f"start < end, at most {max_days:g} days apart")
+        return since, until
 
     def _slot_param(slot: str | None) -> dt.datetime | None:
         if slot is None:
@@ -113,15 +127,17 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
     # -- history -----------------------------------------------------------
     @app.get("/api/events")
-    def events(days: int = Query(30, ge=1, le=400)):
+    def events(days: int = Query(30, ge=1, le=400), start: str | None = None, end: str | None = None):
         """Alerts merged into events: start (first alert), peak (highest
         probability), end (last alert), location at the peak, Grad-CAM of
-        the peak frame when it is still stored."""
-        since = utcnow() - dt.timedelta(days=days)
-        evs = [e for e in read_events(cfg.events_path) if parse_iso(e["t_start"]) >= since]
+        the peak frame when it is still stored. ``start``/``end`` (ISO)
+        select any window instead of the last ``days``."""
+        since, until = _window(start, end, days, 400)
+        evs = [e for e in read_events(cfg.events_path) if since <= parse_iso(e["t_start"]) <= until]
         st = read_json(cfg.loop_state_path, {}) or {}
-        if st.get("current"):
-            evs.append({**st["current"], "closed": False})
+        cur = st.get("current")
+        if cur and since <= parse_iso(cur["t_start"]) <= until:
+            evs.append({**cur, "closed": False})
         for e in evs:
             peak = parse_iso(e["t_pmax"])
             has = gradcam_path(cfg.gradcam_dir, peak, True).exists()
@@ -129,11 +145,11 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         return {"events": evs}
 
     @app.get("/api/series")
-    def series(days: float = Query(3, gt=0, le=14)):
+    def series(days: float = Query(3, gt=0, le=40), start: str | None = None, end: str | None = None):
         """Probability per slot, compact: ``points`` = [[slot, probability
-        or null, state, status], …], oldest first."""
-        now = utcnow()
-        rows = _rows(now - dt.timedelta(days=days), now)
+        or null, state, status], …], oldest first. Last ``days`` (≤ 40), or
+        ``start``/``end`` (ISO, ≤ 40 days apart)."""
+        rows = _rows(*_window(start, end, days, 40))
         return {"threshold": cfg.threshold, "lag_min": cfg.lag_min,
                 "fields": ["slot", "probability", "state", "status"],
                 "points": [[r["slot"], r.get("probability"), r.get("state"), r.get("status")] for r in rows]}
@@ -148,9 +164,28 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
                            for r in _rows(now - dt.timedelta(hours=hours), now)]}
 
     # -- images ------------------------------------------------------------
+    fits_index: dict = {"built": 0.0, "paths": {}}
+
+    def _indexed(name: str) -> Path | None:
+        """FITS in ``CENTELLA_FITS_DIRS`` (e.g. the month a replay ran on),
+        by file name; the index is rebuilt at most every 10 min."""
+        if not cfg.fits_dirs:
+            return None
+        if time.time() - fits_index["built"] > 600:
+            paths = {}
+            for root in cfg.fits_dirs:
+                for p in Path(root).rglob("AIA*.fits"):
+                    paths.setdefault(p.name, p)
+            fits_index.update(built=time.time(), paths=paths)
+        return fits_index["paths"].get(name)
+
     def _slot_files(slot: dt.datetime) -> dict:
         d = cfg.staging_dir / day_key(slot)
-        return {w: d / file_name(slot, w) for w in CHANNELS}
+        out = {}
+        for w in CHANNELS:
+            p = d / file_name(slot, w)
+            out[w] = p if p.exists() else (_indexed(p.name) or p)
+        return out
 
     def _latest_slot(wave: int):
         best = None
@@ -181,14 +216,14 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         return s, _slot_files(s)[wave], [_slot_files(b)[wave] for b in baseline_slots(s, cfg.lag_min, cfg.n_baseline)]
 
     @app.get("/api/frames")
-    def frames(hours: float = Query(6, gt=0, le=168)):
+    def frames(hours: float = Query(6, gt=0, le=168), start: str | None = None, end: str | None = None):
         """Recent slots with what can be shown for each: AIA images
         (``/api/image/{wave}.png?slot=``) while the FITS are kept (7 days),
         Grad-CAM (``/api/gradcam/{slot}.png``) while it is kept (2 days;
-        alerting frames 400 days)."""
-        now = utcnow()
+        alerting frames 400 days). ``start``/``end`` (ISO, ≤ 7 days apart)
+        select any window."""
         out = []
-        for r in _rows(now - dt.timedelta(hours=hours), now):
+        for r in _rows(*_window(start, end, hours / 24, 7)):
             s = parse_iso(r["slot"])
             files = _slot_files(s)
             out.append({"slot": r["slot"], "status": r.get("status"), "state": r.get("state"),
@@ -257,6 +292,63 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             if p.exists():
                 return _png(p.read_bytes(), s, 60 if which == "latest" else 86400)
         raise HTTPException(404, "Grad-CAM not available for this slot")
+
+    # -- retrospective viewer ----------------------------------------------
+    @app.get("/api/range")
+    def data_range():
+        """First and last slot with a result: the span the viewer can browse."""
+        files = sorted(cfg.results_dir.glob("*.jsonl"))
+        if not files:
+            return {"first": None, "last": None, "days": 0}
+        store = ResultStore(cfg.results_dir)
+        first = next((r["slot"] for f in files for r in store.read_day(f.stem)[:1]), None)
+        last = next((store.read_day(f.stem)[-1]["slot"] for f in reversed(files) if store.read_day(f.stem)), None)
+        return {"first": first, "last": last, "days": len(files)}
+
+    @app.get("/api/frame/{slot}")
+    def frame(slot: str):
+        """Everything about one slot: its result row (all fields the loop
+        wrote, or null), which channel images and differences can be shown,
+        and whether there is a Grad-CAM."""
+        s = _slot_param(slot)
+        row = next((r for r in ResultStore(cfg.results_dir).read_day(day_key(s)) if r["slot"] == iso(s)), None)
+        images, diffs = [], []
+        for w in CHANNELS:
+            _, path, bls = _pick(w, s)
+            if path.exists():
+                images.append(w)
+                if sum(b.exists() for b in bls) >= cfg.min_baseline:
+                    diffs.append(w)
+        cam = gradcam_path(cfg.gradcam_dir, s, False).exists() or gradcam_path(cfg.gradcam_dir, s, True).exists()
+        return {"slot": iso(s), "row": row, "images": images, "differences": diffs, "gradcam": cam}
+
+    flare_cache: dict = {"key": None, "flares": []}
+
+    def _flares():
+        srcs = [Path(cfg.flares_csv)] if cfg.flares_csv else sorted(cfg.archive_dir.glob("*/*/*/flares.csv"))
+        key = tuple((str(p), p.stat().st_mtime) for p in srcs if p.exists())
+        if key != flare_cache["key"]:
+            out = {}
+            for p, _ in key:
+                for f in read_csv(Path(p)):
+                    out[f.flare_id] = f
+            flare_cache.update(key=key, flares=sorted(out.values(), key=lambda f: f.tstart))
+        return flare_cache["flares"]
+
+    @app.get("/api/flares")
+    def flares(start: str | None = None, end: str | None = None, days: float = Query(3, gt=0, le=40)):
+        """GOES flares (C and above) in a window, for comparison:
+        ``CENTELLA_FLARES_CSV`` if set, else the curated archive's lists."""
+        since, until = _window(start, end, days, 40)
+        return {"source": cfg.flares_csv or "archive", "flares": [
+            {"id": f.flare_id, "class": f.fclass, "tstart": iso(f.tstart), "tpeak": iso(f.tpeak), "tend": iso(f.tend)}
+            for f in _flares() if f.tend >= since and f.tstart <= until and f.flux >= class_flux("C1.0")]}
+
+    @app.get("/viewer", response_class=HTMLResponse)
+    def viewer():
+        """Retrospective viewer (internal): scrub through the results, AIA
+        channels, differences, Grad-CAM and GOES flares of any period."""
+        return HTMLResponse((resources.files("centella") / "static" / "viewer.html").read_text(encoding="utf-8"))
 
     # -- operations --------------------------------------------------------
     @app.get("/api/health")

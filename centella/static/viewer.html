@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Centella · visor</title>
+<style>
+:root {
+  --bg: #0d1016; --panel: #151a23; --panel2: #1b2130; --line: #273044; --text: #e6e9ef; --muted: #8b93a7;
+  --accent: #f5a623; --prob: #ffb347; --thr: #ff5d5d; --ok: #3ecf8e; --warn: #f5c542; --bad: #ff6b6b;
+  --c: #7aa2f7; --m: #f5a623; --x: #ff4d4d; --ev: rgba(255, 93, 93, .18);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-size: 14px; }
+header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+header h1 span { color: var(--accent); }
+.ctl { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+label { color: var(--muted); font-size: 12px; }
+input, select, button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; font: inherit; }
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.on { background: var(--accent); color: #111; border-color: var(--accent); }
+#range { color: var(--muted); font-size: 12px; }
+main { padding: 12px 16px 24px; display: grid; gap: 12px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+#tl-wrap { position: relative; }
+#tl { display: block; width: 100%; height: 190px; cursor: crosshair; }
+#tip { position: absolute; pointer-events: none; background: #000c; border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; font-size: 12px; display: none; white-space: nowrap; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 6px 12px 10px; color: var(--muted); font-size: 12px; }
+.legend i { display: inline-block; width: 12px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+#transport { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; }
+#now { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; margin-right: 6px; }
+.pill { padding: 2px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); }
+.pill.ok { color: var(--ok); border-color: var(--ok); } .pill.warn { color: var(--warn); border-color: var(--warn); }
+.pill.bad { color: var(--bad); border-color: var(--bad); }
+.pill.quiet { color: var(--muted); } .pill.onset, .pill.active { color: #111; background: var(--thr); border-color: var(--thr); }
+.pill.decay { color: var(--thr); border-color: var(--thr); }
+#prob { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; color: var(--prob); }
+#scrub { flex: 1 1 240px; accent-color: var(--accent); }
+.grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; }
+.tile { position: relative; aspect-ratio: 1; background: #000; border-radius: 8px; overflow: hidden; }
+.tile img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.tile .lbl { position: absolute; left: 8px; top: 6px; font-weight: 600; text-shadow: 0 1px 3px #000; }
+.tile .sub { position: absolute; left: 8px; bottom: 6px; font-size: 11px; color: #cfd5e2; text-shadow: 0 1px 3px #000; font-variant-numeric: tabular-nums; }
+.tile .none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 10px; }
+.side { display: grid; gap: 12px; align-content: start; }
+.side .tile { margin: 8px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 12px 6px; font-weight: 600; }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 12px 12px; font-size: 13px; }
+dt { color: var(--muted); } dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-word; }
+.lists { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 900px) { .lists { grid-template-columns: 1fr; } }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 12px; border-top: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+tbody tr { cursor: pointer; } tbody tr:hover { background: var(--panel2); }
+.scroll { max-height: 280px; overflow: auto; }
+.cls-C { color: var(--c); } .cls-M { color: var(--m); font-weight: 600; } .cls-X { color: var(--x); font-weight: 700; }
+.hit { color: var(--ok); } .miss { color: var(--bad); }
+.muted { color: var(--muted); }
+kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Centella</span> · visor retrospectivo</h1>
+  <div class="ctl">
+    <label for="start">Inicio (UTC)</label><input type="datetime-local" id="start" step="120">
+    <label for="span">Ventana</label>
+    <select id="span">
+      <option value="0.25">6 h</option><option value="1" selected>1 día</option><option value="3">3 días</option>
+      <option value="7">7 días</option><option value="30">30 días</option><option value="40">40 días</option>
+    </select>
+    <button id="load">Cargar</button>
+    <button id="all" title="Todo el período con resultados (hasta 40 días)">Todo</button>
+  </div>
+  <div id="range"></div>
+</header>
+<main>
+  <section class="panel">
+    <div id="tl-wrap"><canvas id="tl"></canvas><div id="tip"></div></div>
+    <div class="legend">
+      <span><i style="background:var(--prob)"></i>probabilidad</span>
+      <span><i style="background:var(--thr)"></i>umbral</span>
+      <span><i style="background:var(--ev)"></i>evento Centella</span>
+      <span><i style="background:var(--c)"></i>GOES C</span><span><i style="background:var(--m)"></i>GOES M</span><span><i style="background:var(--x)"></i>GOES X</span>
+      <span><i style="background:#4b5468"></i>sin resultado</span>
+      <span class="muted">rueda: zoom · arrastrar: mover · doble clic: ver todo · <kbd>←</kbd><kbd>→</kbd> frame · <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1 h · <kbd>espacio</kbd> reproducir · <kbd>J</kbd><kbd>K</kbd> evento</span>
+    </div>
+    <div id="transport">
+      <span id="now">—</span><span id="state" class="pill quiet">—</span><span id="status" class="pill">—</span><span id="prob">—</span>
+      <button id="evprev" title="Evento o flare anterior (J)">⏮</button>
+      <button id="prev" title="Frame anterior (←)">◀</button>
+      <button id="play" title="Reproducir (espacio)">▶</button>
+      <button id="next" title="Frame siguiente (→)">▶▏</button>
+      <button id="evnext" title="Evento o flare siguiente (K)">⏭</button>
+      <select id="fps" title="Velocidad"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="4">4 fps</option><option value="8">8 fps</option></select>
+      <input type="range" id="scrub" min="0" max="0" value="0">
+      <label><input type="checkbox" id="okonly"> solo frames con resultado</label>
+      <span class="ctl"><button id="k-img" class="on">Imagen</button><button id="k-diff">Diferencia</button></span>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="panel"><div class="tiles" id="tiles"></div></section>
+    <div class="side">
+      <section class="panel"><h2>Grad-CAM</h2><div class="tile" id="cam"></div></section>
+      <section class="panel"><h2>Frame</h2><dl id="info"></dl></section>
+    </div>
+  </div>
+
+  <div class="lists">
+    <section class="panel"><h2>Eventos Centella</h2><div class="scroll"><table><thead><tr><th>inicio</th><th>pico</th><th>fin</th><th>p máx</th><th>GOES</th></tr></thead><tbody id="evs"></tbody></table></div></section>
+    <section class="panel"><h2>Flares GOES (≥ C)</h2><div class="scroll"><table><thead><tr><th>clase</th><th>inicio</th><th>pico</th><th>fin</th><th>Centella</th></tr></thead><tbody id="fls"></tbody></table></div></section>
+  </div>
+</main>
+<script>
+"use strict";
+const WAVES = [131, 171, 304, 1600];
+const $ = (id) => document.getElementById(id);
+const MIN = 60e3;
+const S = { frames: [], idx: 0, flares: [], events: [], thr: 0.8, kind: "img", playing: false, v0: 0, v1: 1, t0: 0, t1: 1, timer: null, req: 0 };
+
+const iso = (ms) => new Date(ms).toISOString().slice(0, 19) + "Z";
+const fmt = (ms) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
+const hm = (ms) => new Date(ms).toISOString().slice(11, 16);
+const api = (path) => fetch(path).then((r) => { if (!r.ok) throw new Error(path + " → " + r.status); return r.json(); });
+
+// ---- loading ------------------------------------------------------------
+async function init() {
+  const r = await api("api/range");
+  $("range").textContent = r.first ? `datos: ${fmt(Date.parse(r.first))} → ${fmt(Date.parse(r.last))} UTC (${r.days} días)` : "sin resultados todavía";
+  S.range = r;
+  const h = new URLSearchParams(location.hash.slice(1));
+  const start = h.get("start") || (r.last ? iso(Date.parse(r.last) - 86400e3) : iso(Date.now() - 86400e3));
+  $("start").value = start.slice(0, 16);
+  if (h.get("span")) $("span").value = h.get("span");
+  if (h.get("kind") === "diff") setKind("diff");
+  await load(h.get("t"));
+}
+
+async function load(seekTo) {
+  const t0 = Date.parse($("start").value + ":00Z");
+  const days = parseFloat($("span").value);
+  const t1 = t0 + days * 86400e3;
+  const q = `start=${iso(t0)}&end=${iso(t1)}`;
+  $("range").dataset.loading = "1";
+  const [se, ev, fl] = await Promise.all([api("api/series?" + q), api("api/events?" + q), api("api/flares?" + q).catch(() => ({ flares: [] }))]);
+  S.thr = se.threshold;
+  S.all = se.points.map(([slot, p, state, status]) => ({ t: Date.parse(slot), slot, p, state, status }));
+  S.events = ev.events.map((e) => ({ ...e, a: Date.parse(e.t_start), b: Date.parse(e.t_end), pk: Date.parse(e.t_pmax) }));
+  S.flares = fl.flares.map((f) => ({ ...f, a: Date.parse(f.tstart), pk: Date.parse(f.tpeak), b: Date.parse(f.tend) }));
+  S.t0 = t0; S.t1 = t1; S.v0 = t0; S.v1 = t1;
+  applyFilter();
+  renderLists();
+  const want = seekTo ? Date.parse(seekTo) : (S.frames.length ? S.frames[S.frames.length - 1].t : t0);
+  seek(want);
+}
+
+function applyFilter() {
+  S.frames = $("okonly").checked ? S.all.filter((f) => f.status === "ok") : S.all;
+  $("scrub").max = Math.max(0, S.frames.length - 1);
+}
+
+// ---- frame display ------------------------------------------------------
+function nearest(t) {
+  const F = S.frames; if (!F.length) return 0;
+  let lo = 0, hi = F.length - 1;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (F[mid].t < t) lo = mid + 1; else hi = mid; }
+  if (lo > 0 && Math.abs(F[lo - 1].t - t) <= Math.abs(F[lo].t - t)) lo--;
+  return lo;
+}
+
+function seek(t) { show(nearest(t)); }
+
+function imgUrl(slot, w, kind) { return `api/image/${w}.png?slot=${slot}&kind=${kind}`; }
+
+function tile(el, url, label, sub, why) {
+  el.innerHTML = "";
+  if (url) {
+    const img = new Image(); img.alt = label; img.src = url;
+    img.onerror = () => { el.innerHTML = `<div class="none">${why || "sin imagen"}</div><div class="lbl">${label}</div>`; };
+    el.appendChild(img);
+  } else {
+    el.insertAdjacentHTML("beforeend", `<div class="none">${why || "sin imagen"}</div>`);
+  }
+  el.insertAdjacentHTML("beforeend", `<div class="lbl">${label}</div>` + (sub ? `<div class="sub">${sub}</div>` : ""));
+}
+
+async function show(i) {
+  if (!S.frames.length) { $("now").textContent = "sin frames en esta ventana"; draw(); return; }
+  S.idx = Math.max(0, Math.min(S.frames.length - 1, i));
+  const f = S.frames[S.idx];
+  $("scrub").value = S.idx;
+  $("now").textContent = fmt(f.t) + " UTC";
+  const st = f.state || "—"; $("state").textContent = st; $("state").className = "pill " + (f.state || "quiet");
+  const cls = f.status === "ok" ? "ok" : (f.status === "missing" || f.status === "qc_reject") ? "bad" : "warn";
+  $("status").textContent = f.status; $("status").className = "pill " + cls;
+  $("prob").textContent = f.p == null ? "p —" : "p " + f.p.toFixed(3);
+  if (f.t < S.v0 || f.t > S.v1) { const w = S.v1 - S.v0; S.v0 = Math.max(S.t0, f.t - w / 2); S.v1 = Math.min(S.t1, S.v0 + w); }
+  draw();
+  history.replaceState(null, "", `#t=${f.slot}&start=${$("start").value}&span=${$("span").value}&kind=${S.kind}`);
+  const req = ++S.req;
+  let d;
+  try { d = await api("api/frame/" + f.slot); } catch (e) { d = { images: [], differences: [], gradcam: false, row: null }; }
+  if (req !== S.req) return;  // a newer frame was asked for meanwhile
+  const row = d.row || {};
+  const tiles = $("tiles"); if (!tiles.children.length) WAVES.forEach(() => tiles.appendChild(Object.assign(document.createElement("div"), { className: "tile" })));
+  WAVES.forEach((w, k) => {
+    const have = S.kind === "img" ? d.images.includes(w) : d.differences.includes(w);
+    const tobs = row.inputs && row.inputs[String(w)];
+    tile(tiles.children[k], have ? imgUrl(f.slot, w, S.kind) : null, `${w} Å`, tobs ? "T_OBS " + tobs.slice(11, 19) : "",
+         S.kind === "diff" && d.images.includes(w) ? "sin diferencia (faltan baselines)" : "sin imagen para este slot");
+  });
+  tile($("cam"), d.gradcam ? `api/gradcam/${f.slot}.png` : null, "131 Å + Grad-CAM", "",
+       f.status === "ok" ? "Grad-CAM solo para alertas y el frame más reciente" : "sin resultado: sin Grad-CAM");
+  info(row, d);
+  prefetch(S.idx + 1);
+}
+
+function info(r, d) {
+  const L = [];
+  const add = (k, v) => { if (v !== undefined && v !== null && v !== "") L.push(`<dt>${k}</dt><dd>${v}</dd>`); };
+  add("estado", r.status); add("motivo", r.reason);
+  if (r.qc && r.qc.length) add("QC", r.qc.join(", "));
+  if (r.channels_missing && r.channels_missing.length) add("canales faltantes", r.channels_missing.join(", ") + " Å");
+  add("probabilidad", r.probability != null ? r.probability.toFixed(4) : null);
+  add("alerta", r.alert ? "sí (≥ " + S.thr + ")" : r.status === "ok" ? "no" : null);
+  add("evento", r.event_id);
+  if (r.ensemble_scores) add("miembros", r.ensemble_scores.map((x) => x.toFixed(3)).join(" · "));
+  if (r.n_baseline_used) add("baselines", `${r.n_baseline_used} de ${r.n_baseline}` + (r.baseline_missing && r.baseline_missing.length ? ` (falta ${r.baseline_missing.map((s) => s.slice(11, 16)).join(", ")})` : ""));
+  if (r.aia131_excess != null) add("Δ 131 Å disco", (100 * r.aia131_excess).toFixed(2) + " %");
+  if (r.location && r.location.centroid_arcsec) add("ubicación (exp.)", r.location.centroid_arcsec.map((x) => Math.round(x)).join(", ") + "″" + (r.location.on_limb ? " · limbo" : ""));
+  const g = goesAt(S.frames[S.idx].t); if (g) add("GOES", `<span class="cls-${g.class[0]}">${g.class}</span> ${hm(g.a)}–${hm(g.b)} (pico ${hm(g.pk)})`);
+  $("info").innerHTML = L.join("") || "<dt>sin resultado</dt><dd>este slot no tiene fila en results/</dd>";
+}
+
+const cache = new Set();
+function prefetch(i) {
+  for (let k = i; k < Math.min(S.frames.length, i + 3); k++) {
+    const f = S.frames[k];
+    if (f.status !== "ok" && f.status !== "no_baseline" && f.status !== "inputs_old") continue;
+    WAVES.forEach((w) => { const u = imgUrl(f.slot, w, S.kind); if (!cache.has(u)) { cache.add(u); new Image().src = u; } });
+  }
+}
+
+function goesAt(t) { return S.flares.find((f) => f.a - 10 * MIN <= t && t <= f.b + 5 * MIN); }
+
+// ---- playback -----------------------------------------------------------
+function play(on) {
+  S.playing = on; $("play").textContent = on ? "⏸" : "▶"; $("play").classList.toggle("on", on);
+  clearTimeout(S.timer);
+  if (on) tick();
+}
+function tick() {
+  if (!S.playing) return;
+  if (S.idx >= S.frames.length - 1) { play(false); return; }
+  show(S.idx + 1);
+  S.timer = setTimeout(tick, 1000 / parseFloat($("fps").value));
+}
+
+function jumpEvent(dir) {
+  const t = S.frames[S.idx] ? S.frames[S.idx].t : S.t0;
+  const marks = [...S.events.map((e) => e.a), ...S.flares.filter((f) => f.class[0] !== "C").map((f) => f.a - 10 * MIN)].sort((a, b) => a - b);
+  const m = dir > 0 ? marks.find((x) => x > t + 1) : marks.reverse().find((x) => x < t - 1);
+  if (m !== undefined) seek(m);
+}
+
+function setKind(k) {
+  S.kind = k; $("k-img").classList.toggle("on", k === "img"); $("k-diff").classList.toggle("on", k === "diff");
+  if (S.frames.length) show(S.idx);
+}
+
+// ---- timeline -----------------------------------------------------------
+const cv = $("tl"), ctx = cv.getContext("2d");
+const PAD = { l: 38, r: 10, t: 22, b: 22 };
+function X(t) { return PAD.l + (t - S.v0) / (S.v1 - S.v0) * (cv.clientWidth - PAD.l - PAD.r); }
+function T(x) { return S.v0 + (x - PAD.l) / (cv.clientWidth - PAD.l - PAD.r) * (S.v1 - S.v0); }
+function draw() {
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+  const css = getComputedStyle(document.documentElement), c = (n) => css.getPropertyValue(n).trim();
+  const y0 = H - PAD.b, yt = PAD.t + 12, Y = (p) => y0 - p * (y0 - yt);
+  // axes
+  ctx.strokeStyle = c("--line"); ctx.fillStyle = c("--muted"); ctx.font = "11px system-ui"; ctx.lineWidth = 1;
+  [0, 0.5, 1].forEach((p) => { ctx.beginPath(); ctx.moveTo(PAD.l, Y(p)); ctx.lineTo(W - PAD.r, Y(p)); ctx.stroke(); ctx.fillText(p.toFixed(1), 8, Y(p) + 4); });
+  const span = S.v1 - S.v0, steps = [10, 30, 60, 120, 360, 720, 1440, 2880, 10080].map((m) => m * MIN);
+  const step = steps.find((s) => span / s <= (W - PAD.l) / 90) || steps[steps.length - 1];
+  for (let t = Math.ceil(S.v0 / step) * step; t <= S.v1; t += step) {
+    const x = X(t); ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + 4); ctx.stroke();
+    const d = new Date(t), lbl = step >= 1440 * MIN || (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) ? d.toISOString().slice(5, 10) : hm(t);
+    ctx.fillText(lbl, x - 14, H - 6);
+  }
+  // Centella events
+  ctx.fillStyle = c("--ev");
+  S.events.forEach((e) => { const a = X(e.a - 0), b = X(e.b + 2 * MIN); if (b > PAD.l && a < W) ctx.fillRect(a, yt, Math.max(2, b - a), y0 - yt); });
+  // GOES flares (top band)
+  S.flares.forEach((f) => {
+    const a = X(f.a), b = X(f.b); if (b < PAD.l || a > W) return;
+    ctx.fillStyle = c("--" + f.class[0].toLowerCase()); ctx.globalAlpha = f.class[0] === "C" ? 0.55 : 0.95;
+    ctx.fillRect(a, 4, Math.max(2, b - a), 10); ctx.globalAlpha = 1;
+    if (f.class[0] !== "C" && b - a > 2) { ctx.fillStyle = c("--text"); ctx.fillText(f.class, a, 30 > yt ? 32 : 30); }
+  });
+  // threshold
+  ctx.strokeStyle = c("--thr"); ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(PAD.l, Y(S.thr)); ctx.lineTo(W - PAD.r, Y(S.thr)); ctx.stroke(); ctx.setLineDash([]);
+  // probability + gaps
+  ctx.strokeStyle = c("--prob"); ctx.lineWidth = 1.4; ctx.beginPath();
+  let pen = false, prevT = 0;
+  const pts = S.all || [];
+  for (const f of pts) {
+    if (f.t < S.v0 - 2 * MIN || f.t > S.v1 + 2 * MIN) continue;
+    if (f.p == null) { pen = false; continue; }
+    const x = X(f.t), y = Y(f.p);
+    if (!pen || f.t - prevT > 6 * MIN) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    pen = true; prevT = f.t;
+  }
+  ctx.stroke();
+  if (S.v1 - S.v0 <= 12 * 60 * MIN) {   // short window: a dot per result, so isolated ones show
+    ctx.fillStyle = c("--prob");
+    for (const f of pts) if (f.p != null && f.t >= S.v0 && f.t <= S.v1) { ctx.beginPath(); ctx.arc(X(f.t), Y(f.p), 2, 0, 7); ctx.fill(); }
+  }
+  ctx.fillStyle = "#4b5468";
+  for (const f of pts) if (f.p == null && f.t >= S.v0 && f.t <= S.v1) ctx.fillRect(X(f.t), y0 - 3, 1.5, 3);
+  // cursor
+  const cur = S.frames[S.idx];
+  if (cur) { ctx.strokeStyle = c("--text"); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(X(cur.t), 0); ctx.lineTo(X(cur.t), y0); ctx.stroke(); }
+}
+
+let drag = null;
+cv.addEventListener("mousedown", (e) => { drag = { x: e.offsetX, v0: S.v0, v1: S.v1, moved: false }; });
+window.addEventListener("mouseup", (e) => {
+  if (drag && !drag.moved && e.target === cv) seek(T(e.offsetX));
+  drag = null;
+});
+cv.addEventListener("mousemove", (e) => {
+  if (drag) {
+    const dt = (drag.x - e.offsetX) / (cv.clientWidth - PAD.l - PAD.r) * (drag.v1 - drag.v0);
+    if (Math.abs(drag.x - e.offsetX) > 3) drag.moved = true;
+    const w = drag.v1 - drag.v0; S.v0 = Math.max(S.t0, Math.min(S.t1 - w, drag.v0 + dt)); S.v1 = S.v0 + w; draw();
+  }
+  const t = T(e.offsetX), tip = $("tip");
+  const F = S.all || []; let best = null, bd = Infinity;
+  for (const f of F) { const d = Math.abs(f.t - t); if (d < bd) { bd = d; best = f; } if (f.t > t + 4 * MIN) break; }
+  if (best && bd < 6 * MIN) {
+    const g = goesAt(best.t);
+    tip.innerHTML = `${fmt(best.t)} · ${best.p == null ? best.status : "p " + best.p.toFixed(3)}` + (g ? ` · GOES ${g.class}` : "");
+    tip.style.display = "block"; tip.style.left = Math.min(e.offsetX + 12, cv.clientWidth - 240) + "px"; tip.style.top = "26px";
+  } else tip.style.display = "none";
+});
+cv.addEventListener("mouseleave", () => { $("tip").style.display = "none"; });
+cv.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const t = T(e.offsetX), k = e.deltaY > 0 ? 1.25 : 0.8;
+  let w = Math.min(S.t1 - S.t0, Math.max(30 * MIN, (S.v1 - S.v0) * k));
+  S.v0 = Math.max(S.t0, t - (t - S.v0) / (S.v1 - S.v0) * w); S.v1 = Math.min(S.t1, S.v0 + w); S.v0 = S.v1 - w; draw();
+}, { passive: false });
+cv.addEventListener("dblclick", () => { S.v0 = S.t0; S.v1 = S.t1; draw(); });
+window.addEventListener("resize", draw);
+
+// ---- lists --------------------------------------------------------------
+function renderLists() {
+  const hitFor = (f) => S.events.find((e) => e.a <= f.b + 5 * MIN && e.b >= f.a - 10 * MIN);
+  $("evs").innerHTML = S.events.map((e, i) => {
+    const g = S.flares.find((f) => e.a <= f.b + 30 * MIN && e.b >= f.a - 10 * MIN);
+    return `<tr data-t="${e.a}"><td>${fmt(e.a)}</td><td>${hm(e.pk)}</td><td>${hm(e.b)}</td><td>${(+e.p_max).toFixed(2)}</td><td>${g ? `<span class="cls-${g.class[0]}">${g.class}</span>` : '<span class="miss">ninguno</span>'}</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">sin eventos en esta ventana</td></tr>`;
+  $("fls").innerHTML = S.flares.map((f) => {
+    const big = f.class[0] !== "C", h = hitFor(f);
+    return `<tr data-t="${f.a - 10 * MIN}"><td class="cls-${f.class[0]}">${f.class}</td><td>${fmt(f.a)}</td><td>${hm(f.pk)}</td><td>${hm(f.b)}</td><td>${h ? `<span class="hit">alerta ${hm(h.a)}</span>` : big ? '<span class="miss">no detectado</span>' : '<span class="muted">—</span>'}</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">sin flares GOES (configura CENTELLA_FLARES_CSV o corre la curación)</td></tr>`;
+  document.querySelectorAll("tbody tr[data-t]").forEach((tr) => tr.addEventListener("click", () => { play(false); seek(+tr.dataset.t); }));
+}
+
+// ---- wiring -------------------------------------------------------------
+$("load").onclick = () => { play(false); load(); };
+$("all").onclick = () => {
+  if (!S.range.first) return;
+  const a = Date.parse(S.range.first), b = Date.parse(S.range.last);
+  $("start").value = iso(a).slice(0, 16);
+  const d = (b - a) / 86400e3; $("span").value = d <= 0.25 ? "0.25" : d <= 1 ? "1" : d <= 3 ? "3" : d <= 7 ? "7" : d <= 30 ? "30" : "40";
+  play(false); load();
+};
+$("prev").onclick = () => { play(false); show(S.idx - 1); };
+$("next").onclick = () => { play(false); show(S.idx + 1); };
+$("play").onclick = () => play(!S.playing);
+$("evprev").onclick = () => { play(false); jumpEvent(-1); };
+$("evnext").onclick = () => { play(false); jumpEvent(1); };
+$("scrub").oninput = (e) => show(+e.target.value);
+$("okonly").onchange = () => { const t = S.frames[S.idx] && S.frames[S.idx].t; applyFilter(); seek(t || S.t0); };
+$("k-img").onclick = () => setKind("img");
+$("k-diff").onclick = () => setKind("diff");
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox") return;
+  const f = S.frames[S.idx];
+  if (e.key === "ArrowRight") { e.preventDefault(); play(false); e.shiftKey && f ? seek(f.t + 60 * MIN) : show(S.idx + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); play(false); e.shiftKey && f ? seek(f.t - 60 * MIN) : show(S.idx - 1); }
+  else if (e.key === " ") { e.preventDefault(); play(!S.playing); }
+  else if (e.key === "k" || e.key === "K") { play(false); jumpEvent(1); }
+  else if (e.key === "j" || e.key === "J") { play(false); jumpEvent(-1); }
+});
+init().catch((e) => { $("range").textContent = "error: " + e.message; });
+</script>
+</body>
+</html>

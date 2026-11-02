@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-RELEASE = os.environ.get("CENTELLA_RELEASE_URL", "https://github.com/HelioUSACH/flare-nrt/releases/download/v2.1.0")
+RELEASE = os.environ.get("CENTELLA_RELEASE_URL", "https://github.com/HelioUSACH/flare-nrt/releases/download/v2.2.0")
 
 FILES = {
     # name: (subdirectory, SHA-256, size in bytes)

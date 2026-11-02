@@ -10,6 +10,7 @@ it on `127.0.0.1:5050`.
 - Model card: [`docs/model-card.md`](docs/model-card.md)
 - Deployment on the portal's server: [`deploy/README.md`](deploy/README.md)
 - Archive for retraining: [`docs/archive-format.md`](docs/archive-format.md)
+- Retrospective viewer: [`docs/viewer.md`](docs/viewer.md)
 
 The steps below work on a fresh Ubuntu 24.04 machine with no GPU, in this
 order.
@@ -56,7 +57,14 @@ Other jobs:
 python -m centella.curate                                  # daily: archive + labels + retention
 python -m centella.validate --start 2026-10-21 --end 2026-10-27   # vs GOES and vs the baseline rule
 python -m centella.loop --replay /path/to/fits             # replay stored FITS through the same code
+python -m centella.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv   # GOES list of a past period
 ```
+
+`http://127.0.0.1:5050/viewer` is a retrospective viewer. It lets you
+scrub through any period frame by frame: the probability over time, the 4
+AIA channels and their differences, the Grad-CAM, and the GOES flares.
+docs/viewer.md explains how to browse a replayed month without copying its
+FITS.
 
 ## 4. Test
 

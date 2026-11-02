@@ -104,7 +104,7 @@ What this says against the baselines:
   a position on the disk, not an earlier warning.
 - **Against `aia131_rise`:** this is the test of whether the network adds
   anything over a simple brightness rule on the same frames. It needs the
-  month replayed with 2.1.0, which records `aia131_excess`:
+  month replayed with 2.1.0 or later, which records `aia131_excess`:
 
   ```
   python -m centella.loop --replay <month FITS>

@@ -25,7 +25,7 @@ from . import __version__
 from .artifacts import Artifacts
 from .config import Settings
 from .detector import EventTracker, FrameBuffer, baseline_slots, is_alert
-from .grid import CADENCE, CHANNELS, floor_slot, iso, parse_datetime, parse_iso, utcnow
+from .grid import CADENCE, CHANNELS, day_key, floor_slot, iso, parse_datetime, parse_iso, utcnow
 from .localize import localize, rate_map
 from .model import Ensemble
 from .preprocess import build_current, build_input, load_norm_stats
@@ -139,8 +139,9 @@ class Processor:
         else:
             inputs = self.inputs.get(slot) or {}
             row["inputs"] = inputs
-            age = input_age_s(inputs, now)
-            row["input_age_s"] = age
+            age = input_age_s(inputs, now) if self.live else None   # a replay's inputs are old by design
+            if age is not None:
+                row["input_age_s"] = age
             bl_slots = baseline_slots(slot, cfg.lag_min, cfg.n_baseline)
             bls = [self.current(s) for s in bl_slots]
             have = [(s, b) for s, b in zip(bl_slots, bls, strict=True) if b is not None and b is not MISSING]
@@ -252,7 +253,8 @@ def should_skip(src, slot: dt.datetime, now: dt.datetime, cfg: Settings,
     return any(src.paths(slot + k * CADENCE) is not None for k in range(1, n_later + 1))
 
 
-def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Processor:
+def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
+        replay_gradcam: bool = True, resume: bool = False) -> Processor:
     cfg.ensure_dirs()
     torch.set_num_threads(cfg.torch_threads)
     ens = Ensemble.load(cfg.weights, cfg.weights_sha256)
@@ -266,8 +268,23 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None) -> Pr
              "live" if live else f"replay {replay_dir}", ens.meta["sha256"][:12])
 
     if not live:
-        for slot in src.slots:
+        # Grad-CAM of the alerting frames only (the retrospective viewer); no tensors
+        proc.artifacts = Artifacts(cfg, ens, enabled=replay_gradcam, tensors=False)
+        proc.gradcam_wanted = False
+        done = set()
+        if resume:
+            for d in sorted({day_key(s) for s in src.slots}):
+                done |= {r["slot"] for r in proc.results.read_day(d)}
+        todo = [s for s in src.slots if iso(s) not in done]
+        if done:
+            log.info("resume: %d slots already in results, %d to go", len(src.slots) - len(todo), len(todo))
+        t0 = time.monotonic()
+        for i, slot in enumerate(todo, 1):
             proc.process(slot, utcnow())
+            if i % 360 == 0 or i == len(todo):   # every 12 h of data
+                left = (time.monotonic() - t0) / i * (len(todo) - i) / 60
+                log.info("replay at %s: %d/%d slots, %d ok, %d events, ~%.0f min left",
+                         iso(slot), i, len(todo), proc.frame_count, proc.tracker.last_id, left)
         proc.flush()
         return proc
 
@@ -319,6 +336,8 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--replay", help="process existing FITS in this directory, then exit")
     ap.add_argument("--data-dir", help="override CENTELLA_DATA_DIR")
+    ap.add_argument("--resume", action="store_true", help="replay: skip slots already in results/")
+    ap.add_argument("--no-gradcam", action="store_true", help="replay: don't save Grad-CAM of alerting frames")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
                         stream=sys.stdout)
@@ -327,7 +346,7 @@ def main(argv=None) -> None:
         from pathlib import Path
         cfg.data_dir = Path(a.data_dir)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    run(cfg, replay_dir=a.replay)
+    run(cfg, replay_dir=a.replay, replay_gradcam=not a.no_gradcam, resume=a.resume)
 
 
 if __name__ == "__main__":

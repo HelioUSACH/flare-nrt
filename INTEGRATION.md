@@ -6,7 +6,7 @@
 | Kind | event (detection) |
 | Target (forecasts) | n/a |
 | Owner(s) | Nicolás Campos (HelioUSACH); supervisor and deployment: Víctor A. Pinto |
-| Repo, current tag | `HelioUSACH/flare-nrt`, `v2.1.0` (Python package `centella`) |
+| Repo, current tag | `HelioUSACH/flare-nrt`, `v2.2.0` (Python package `centella`) |
 | Run cadence | One result per AIA synoptic slot (2 min), as soon as its 4 channels and at least 2 of its 3 baseline frames are on disk |
 | Inputs | **AIA synoptic 131/171/304/1600 Å**, 1024², level 1.5 quicklook. Source: `https://jsoc1.stanford.edu/data/aia/synoptic/mostrecent/AIAsynoptic{0131,0171,0304,1600}.fits`, polled every 30 s. Gaps are filled from the dated archive (`…/synoptic/YYYY/MM/DD/HHH00/`), which lags real time; it is queried at most every 10 min. Typical latency from T_OBS to availability: ~7–10 min (measured on 2026-10-28; `data_latency_s` in every result). Public (NASA/SDO). ≈ 2.75 GB/day. **GOES flare list** (labels for curation and validation only, daily): `https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json`, public domain, < 50 kB/day |
 | New data the portal must collect | none (the portal already stores GOES XRS, which it compares itself) |
@@ -51,7 +51,7 @@ UTC with `Z`.
 | `last_frame` | object | | the newest slot the loop looked at, whether or not it produced a result: `slot`, `made_at`, `status` (`ok` / `missing` / `qc_reject` / `no_baseline` / `inputs_old`), `reason`, `qc` (QC reasons), `channels_missing`, `baseline_missing`, `input_age_s`, `inputs` |
 | `data_latency_s` | integer | s | processing time − slot time |
 | `latency_ms` | integer | ms | inference time |
-| `model`, `model_version`, `weights_sha256` | string | | `"Centella"`, `"2.1.0"`, the weights' hash |
+| `model`, `model_version`, `weights_sha256` | string | | `"Centella"`, `"2.2.0"`, the weights' hash |
 | `frame_count`, `loop_errors`, `loop_last_error`, `loop_last_error_ts` | | | loop health since start |
 | `server_time` | ISO `Z` | | |
 
@@ -79,6 +79,24 @@ internal on 127.0.0.1; the portal proxies or copies what it shows.
 | `GET /api/channels` | the 4 channels of the default image: slot, T_OBS, whether the difference exists |
 | `GET /api/results?hours=24` (≤ 168) | as in 2.0: `points` = [{t, p, status, state, event_id}] |
 | `GET /api/health` | 24 h coverage, status counts, median data latency, last download, free disk |
+
+Since 2.2, `/api/series`, `/api/events` and `/api/frames` also take
+`start`/`end` (ISO 8601) to select any past window: ≤ 40 days for series,
+≤ 400 for events, ≤ 7 for frames. A window that is too long or reversed
+gets a 422.
+
+**Retrospective viewer (internal, 2.2):** `GET /viewer` is an HTML page for
+browsing any period frame by frame (docs/viewer.md). It is built on the
+endpoints above plus:
+
+| endpoint | returns |
+|---|---|
+| `GET /api/range` | `{first, last, days}`: the span with results |
+| `GET /api/frame/{ISO}` | `{slot, row, images, differences, gradcam}`: the slot's full result row (or null), the channels whose image and difference can be shown, whether a Grad-CAM exists |
+| `GET /api/flares?start=&end=` | GOES flares ≥ C in the window, from `CENTELLA_FLARES_CSV` or the curated archive |
+
+The portal's own page can reuse the same pieces (time series with a
+cursor, image per slot) for a public "look back" view.
 
 ## Stored per frame
 

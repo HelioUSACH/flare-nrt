@@ -9,7 +9,9 @@ re-training, besides the result row:
   (2), and ``HHMM_alert.png`` for alerting frames, kept
   ``gradcam_alert_days`` (400).
 
-Live mode only (a month's replay would write ~60 GB of tensors)."""
+Live mode keeps both. A replay (``python -m centella.loop --replay``) keeps
+only the Grad-CAM of alerting frames, for the retrospective viewer: a month
+of tensors would be ~60 GB."""
 
 from __future__ import annotations
 
@@ -62,10 +64,11 @@ def _write(path: Path, data: bytes) -> None:
 
 
 class Artifacts:
-    def __init__(self, cfg, ensemble, enabled: bool = True):
+    def __init__(self, cfg, ensemble, enabled: bool = True, tensors: bool = True):
         self.cfg = cfg
         self.ens = ensemble
         self.enabled = enabled
+        self.tensors = tensors
         self.last_gradcam_ms: int | None = None
 
     def save(self, slot: dt.datetime, x, current, alert: bool, gradcam: bool = True,
@@ -74,9 +77,10 @@ class Artifacts:
         if not self.enabled:
             return
         try:
-            buf = io.BytesIO()
-            np.savez_compressed(buf, x=x.cpu().numpy())
-            _write(tensor_path(self.cfg.tensors_dir, slot), buf.getvalue())
+            if self.tensors:
+                buf = io.BytesIO()
+                np.savez_compressed(buf, x=x.cpu().numpy())
+                _write(tensor_path(self.cfg.tensors_dir, slot), buf.getvalue())
             if not gradcam:
                 return
             t0 = time.perf_counter()

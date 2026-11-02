@@ -74,6 +74,13 @@ class Settings:
     neg_block_min: int = field(default_factory=lambda: int(_env("NEG_BLOCK_MIN", "60")))
     min_flare_class: str = field(default_factory=lambda: _env("MIN_FLARE_CLASS", "C1.0"))
 
+    # read-only trees with more AIA FITS (AIAYYYYMMDD_HHMM_WWWW.fits, any depth), searched
+    # by the API after staging/: e.g. the FITS a month's replay was run on
+    fits_dirs: list = field(default_factory=lambda: [Path(p) for p in _env("FITS_DIRS", "").split(os.pathsep) if p])
+    # GOES flare list for the viewer (CSV: tstart,tpeak,tend,fclass); default: the
+    # curated archive's flares.csv files
+    flares_csv: str = field(default_factory=lambda: _env("FLARES_CSV", ""))
+
     host: str = field(default_factory=lambda: _env("HOST", "127.0.0.1"))
     port: int = field(default_factory=lambda: int(_env("PORT", "5050")))
 
