@@ -155,7 +155,10 @@ def main(argv=None) -> None:
     a = ap.parse_args(argv)
     d0 = dt.datetime.strptime(a.start, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc)
     d1 = dt.datetime.strptime(a.end, "%Y-%m-%d").replace(tzinfo=dt.timezone.utc) + dt.timedelta(days=1)
-    flares = fetch_hek(d0, d1)
+    try:
+        flares = fetch_hek(d0, d1)
+    except Exception as e:  # network, HEK down, bad answer: say it in one line
+        raise SystemExit(f"HEK did not answer ({type(e).__name__}: {str(e)[:160]})") from None
     write_csv(Path(a.out), flares)
     by = {}
     for f in flares:
