@@ -2,7 +2,11 @@
 
 ## 2.3.0 — 2026-11-03
 
-Location validated against a catalogue.
+Location validated against a catalogue. Model card updated with the
+calibration month replayed in 2.3. Detection is beaten out of sample by
+the `aia131_rise` rule (98 % vs 72 % of M/X flares); location error has a
+median of 14″; 2 of 3 baselines are identical to 3 of 3; low-probability
+alternation is mild (0.60).
 
 - `python -m centella.goes` now writes flare positions (`hpc_x`, `hpc_y`,
   helioprojective arcsec). Each SWPC flare takes the position LMSAL's "SSW

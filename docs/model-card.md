@@ -16,7 +16,10 @@ For each AIA slot it reports:
 - a **Grad-CAM** map.
 
 It is meant for people who want an image-based confirmation of a flare and
-where it is on the disk, alongside GOES X-rays. Maturity: **beta**, the same
+where it is on the disk, alongside GOES X-rays. **On detection alone it is
+beaten** by a simple rule on the disk-integrated 131 Å light curve (98 %
+vs 72 % of M/X flares, same month, out of sample; see Performance). What
+it adds is the location: a median of 14″ from catalogue positions. Maturity: **beta**, the same
 as the portal's manifest. It is not ready for "operational": no
 live-period numbers yet, and the threshold was set on the evaluation month
 itself.
@@ -89,29 +92,41 @@ synoptic stream from the dated archive: 28.2 days, 95 % of slots usable,
 54 M/X and 161 C flares. The threshold was chosen on this month, so these
 numbers are optimistic.
 
-| rule | M/X detected | ≥ M2 | M1–M2 | false alarms | first alert vs GOES start / peak (median) |
-|---|---|---|---|---|---|
-| **GOES XRS event rule** (SWPC event start: the flux rise that defines the labels) | 100 % by construction | 100 % | 100 % | 0 by construction | 0 min (reference) |
-| **Centella 2.x**, L = 8, threshold 0.80, 3 of 3 baselines | **72 % (39/54)** | **100 % (22/22)** | **53 %** | **3** (≈ 1 per 9 days) | **+9 min / −1 min** |
-| **`aia131_rise`** (no network, same frames, disk-integrated 131 Å rise ≥ k, k set for 3 false alarms) | pending | | | 3 | |
-| No-skill (climatology) | 0 alerts → 0 % | | | 0 | |
+Replayed with Centella 2.3 (2026-11-03, `python -m centella.validate`;
+GOES list and positions from HEK):
+
+| rule | M/X detected | ≥ M2 | M1–M2 | false alarms | time alerting | first alert vs GOES start / peak (median) |
+|---|---|---|---|---|---|---|
+| **GOES XRS event rule** (SWPC event start: the flux rise that defines the labels) | 100 % by construction | 100 % | 100 % | 0 by construction | — | 0 min (reference) |
+| **Centella 2.x**, L = 8, threshold 0.80 (2 of 3 or 3 of 3 baselines: identical) | **72 % (39/54)** | **100 % (22/22)** | **53 %** | **3** (≈ 1 per 9 days) | 1.4 % of slots | **+9 min / −1 min** |
+| **`aia131_rise`**: no network, same frames; alert when the disk-integrated 131 Å count rate is ≥ k above the same baseline frames (k = 4.9 %, set for Centella's 3 false alarms) | **98 % (53/54)** | | | 3 | 2.0 % of slots | +8 min / −2 min |
+| `aia131_rise`, **out of sample**: k chosen on one half of the month (3.5 % / 4.9 %), scored on the other | **98 % (53/54)** | | | 5 | | |
+| Centella on the same halves (its threshold is fixed) | 72 % (39/54) | | | 3 | | |
+| No-skill (climatology) | 0 alerts → 0 % | | | 0 | | |
 
 What this says against the baselines:
 
 - **Against GOES XRS:** Centella does **not** detect earlier. Its first
   alert comes a median 9 min after the GOES start and 1 min before the
-  GOES peak. Its value is an independent, imaging-based confirmation with
-  a position on the disk, not an earlier warning.
-- **Against `aia131_rise`:** this is the test of whether the network adds
-  anything over a simple brightness rule on the same frames. It needs the
-  month replayed with 2.1.0 or later, which records `aia131_excess`:
-
-  ```
-  python -m centella.loop --replay <month FITS>
-  python -m centella.validate --start 2026-06-19 --end 2026-07-17
-  ```
-
-  The report's `baseline` block fills this row.
+  GOES peak.
+- **Against `aia131_rise`: the network is beaten on detection.** On the
+  same frames and with about the same time spent alerting, a one-line
+  rule on the disk-integrated 131 Å rise detects 14 more M/X flares.
+  That holds out of sample:
+  with k fitted on either half and scored on the other, the rule finds
+  53/54 with 5 false alarms, against Centella's 39/54 with 3. Physically,
+  131 Å includes Fe XXI (~10 MK flare plasma), so its disk-integrated
+  light curve behaves like an EUV analogue of GOES XRS. The likely cause on
+  the network's side is the baseline-age shortcut below, which forces its
+  high threshold.
+- **What Centella adds is the location**, which a disk-integrated rule
+  cannot give: for 36 detected M/X flares with a catalogue position, the
+  median distance between Centella's location and the catalogue's is
+  **14″**, and **89 %** are within 120″. The catalogue positions come from
+  LMSAL's "SSW Latest Events" via HEK. They are also derived from AIA, but
+  by an independent pipeline.
+- **Baselines, 2 of 3 vs 3 of 3:** identical results, with 144 more slots
+  usable (19,438 vs 19,294 of 20,315). 2 of 3 stays the default.
 
 **Independent check, 2026-04-23 → 25:** 48 h with 10 M/X flares,
 including X2.4 and X2.5, run through the operational loop with L = 6 and
@@ -154,14 +169,18 @@ will be updated from those reports.
   connections. Version 2.1 polls every 30 s and retries; `coverage_24h` in
   `/api/health` tracks it. While inputs are older than 15 min the product
   reads `stale`.
-- **Low-probability 2-frame alternation (seen in 1.x).** Not yet measured
-  for 2.x. `centella.validate` now reports it (`alternation`: the fraction
-  of consecutive low-probability steps that reverse sign; ~0.5 for noise,
-  ~1 for strict alternation).
-- **Location is experimental.** It is the brightest region of the 131 Å
-  difference. Since 2.3, `centella.validate` measures its distance to the
-  catalogue position (LMSAL "SSW Latest Events" via HEK) for each detected
-  M/X flare; the calibration month's numbers are pending.
+- **Detection is beaten by a simple 131 Å rule** (Performance). Until a
+  retrained network does better, the detection claim is the rule's, and
+  Centella's is the location and the imaging confirmation.
+- **Low-probability alternation (seen in 1.x), mild in 2.x.** 60 % of
+  consecutive low-probability steps (p < 0.3, |Δp| ≥ 0.02) reverse sign,
+  against ~50 % for noise and ~100 % for a strict 2-frame alternation
+  (calibration month, `alternation` in `centella.validate`).
+- **Location: measured on one month only.** It is the brightest region of
+  the 131 Å difference: median 14″ from the catalogue position, 89 % within
+  120″ (36 M/X, calibration month). Limb flares and simultaneous flares in
+  two regions are its expected failure cases; the per-flare list is in
+  the validation report (`location.flares`).
 
 ## Maintainers / links
 
