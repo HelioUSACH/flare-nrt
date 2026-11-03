@@ -55,6 +55,14 @@ UTC with `Z`.
 | `frame_count`, `loop_errors`, `loop_last_error`, `loop_last_error_ts` | | | loop health since start |
 | `server_time` | ISO `Z` | | |
 
+`experimental` (object) holds `aia131_rule`: `label` ("experimental: not
+part of the model's signal"), `rule`, `k`, `excess` (the disk-integrated
+131 Å rise of this slot over its baselines), `alert`, `flare_detected`,
+`event_id`, `event_t_start` and `location`. It is a second detector,
+computed and stored for evaluation (model card, `aia131_rise`). It never
+feeds the fields above, and the portal should not publish it as the
+product. Its events are at `/api/events?signal=aia131`.
+
 Not sent: `severity`. It was exploratory in 1.x and was removed in 2.0.
 
 **Compatibility:** 2.1 only adds fields. A portal reading 2.0 or 1.x

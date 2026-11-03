@@ -127,22 +127,31 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
     # -- history -----------------------------------------------------------
     @app.get("/api/events")
-    def events(days: int = Query(30, ge=1, le=400), start: str | None = None, end: str | None = None):
+    def events(days: int = Query(30, ge=1, le=400), start: str | None = None, end: str | None = None,
+               signal: str = Query("model", pattern="^(model|aia131)$")):
         """Alerts merged into events: start (first alert), peak (highest
         probability), end (last alert), location at the peak, Grad-CAM of
         the peak frame when it is still stored. ``start``/``end`` (ISO)
-        select any window instead of the last ``days``."""
+        select any window instead of the last ``days``. ``signal=aia131``:
+        the EXPERIMENTAL 131 Å rule's events instead (``p_max`` is then the
+        peak disk-integrated 131 Å rise, not a probability)."""
         since, until = _window(start, end, days, 400)
-        evs = [e for e in read_events(cfg.events_path) if since <= parse_iso(e["t_start"]) <= until]
+        exp = signal == "aia131"
+        path = cfg.experimental_events_path if exp else cfg.events_path
+        evs = [e for e in read_events(path) if since <= parse_iso(e["t_start"]) <= until]
         st = read_json(cfg.loop_state_path, {}) or {}
-        cur = st.get("current")
+        cur = st.get("x_current" if exp else "current")
         if cur and since <= parse_iso(cur["t_start"]) <= until:
             evs.append({**cur, "closed": False})
         for e in evs:
             peak = parse_iso(e["t_pmax"])
             has = gradcam_path(cfg.gradcam_dir, peak, True).exists()
             e["gradcam"] = f"/api/gradcam/{iso(peak)}.png" if has else None
-        return {"events": evs}
+        out = {"events": evs}
+        if exp:
+            out["label"] = "experimental: not part of the model's signal"
+            out["k"] = cfg.rule131_k
+        return out
 
     @app.get("/api/series")
     def series(days: float = Query(3, gt=0, le=40), start: str | None = None, end: str | None = None):

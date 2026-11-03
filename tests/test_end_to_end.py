@@ -437,3 +437,43 @@ def test_live_flares_add_swpc_recent_list(cfg, monkeypatch):
 
     monkeypatch.setattr(srv, "fetch_swpc", down)
     assert TestClient(create_app(cfg)).get("/api/flares?days=1").status_code == 200
+
+
+def test_experimental_131_rule_is_stored_apart(cfg):
+    """The 131 Å rule runs next to the model, with its own events, labelled
+    experimental; the model's probability, alert, state and events are
+    exactly what they are without it."""
+    slots = _make_day(cfg, n=16, bad=(), flare_from=12)
+    cfg.rule131_k = 0.0          # every ok slot "alerts" under the rule
+    run(cfg, replay_dir=cfg.staging_dir)
+    rows = ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}")
+    ok = [r for r in rows if r["status"] == "ok"]
+    assert ok and all(r["experimental"]["aia131_rule"]["alert"] for r in ok if r["aia131_excess"] >= 0)
+    assert all("experimental" not in r for r in rows if r["status"] != "ok")
+    assert not any(r["alert"] for r in ok)                       # stand-in model under 0.80: no model alert
+    assert not cfg.events_path.exists() and cfg.experimental_events_path.exists()
+    st = read_json(cfg.status_path)
+    x = st["experimental"]["aia131_rule"]
+    assert x["label"].startswith("experimental") and x["k"] == 0.0
+    assert st["flare_detected"] is False and st["state"] == "quiet"
+    c = TestClient(create_app(cfg))
+    write_json_atomic(cfg.state_dir / "heartbeat.json", {"heartbeat": iso(dt.datetime.now(dt.timezone.utc))})
+    assert c.get(f"/api/events?start={iso(T0)}&end={iso(slots[-1])}").json()["events"] == []
+    xe = c.get(f"/api/events?signal=aia131&start={iso(T0)}&end={iso(slots[-1])}").json()
+    assert xe["label"].startswith("experimental") and len(xe["events"]) == 1
+    assert c.get("/api/events?signal=nope").status_code == 422
+
+
+def test_validate_scores_the_experimental_rule_at_its_fixed_k():
+    from centella.validate import experimental_rule
+
+    D0 = dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc)
+    from centella.goes import Flare
+    rows = [{"slot": iso(D0 + i * CADENCE), "status": "ok", "aia131_excess": 0.08 if 30 <= i <= 33 else 0.01}
+            for i in range(60)]
+    fl = [Flare(D0 + 58 * dt.timedelta(minutes=1), D0 + 62 * dt.timedelta(minutes=1),
+                D0 + 70 * dt.timedelta(minutes=1), "M2.0")]
+    r = experimental_rule(rows, fl, 0.04)
+    assert r["available"] and r["mx_detected"] == 1 and r["false_alarms"] == 0
+    assert r["time_alerting"] == round(4 / 60, 4)
+    assert experimental_rule([{"slot": iso(D0), "status": "ok"}], fl, 0.04)["available"] is False

@@ -171,7 +171,10 @@ will be updated from those reports.
   reads `stale`.
 - **Detection is beaten by a simple 131 Å rule** (Performance). Until a
   retrained network does better, the detection claim is the rule's, and
-  Centella's is the location and the imaging confirmation.
+  Centella's is the location and the imaging confirmation. Since 2.4 the
+  rule runs live next to the model as an **experimental** signal
+  (`experimental.aia131_rule`, k = 0.04), stored but not published. Its
+  live score is in `centella.validate` (`experimental_aia131`).
 - **Low-probability alternation (seen in 1.x), mild in 2.x.** 60 % of
   consecutive low-probability steps (p < 0.3, |Δp| ≥ 0.02) reverse sign,
   against ~50 % for noise and ~100 % for a strict 2-frame alternation

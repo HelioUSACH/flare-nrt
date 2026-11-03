@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.4.0 — 2026-11-03
+
+An experimental second signal, stored apart. The product's signal is
+unchanged.
+
+- Every `ok` result also evaluates the **131 Å rule**: alert when the
+  disk-integrated 131 Å count rate is ≥ k above the same baseline frames.
+  `CENTELLA_RULE131_K` defaults to 0.04; out of sample it ranged 3.5–4.9 %
+  on the calibration month (model card). The rule has its own events
+  (`events_aia131.csv`, `/api/events?signal=aia131`), with Centella's
+  location at the slots where the rule alerts. It appears under
+  `experimental.aia131_rule` in each result and in `/api/status`, labelled
+  "experimental: not part of the model's signal". `probability`, `alert`,
+  `state`, `flare_detected` and the events are exactly as before
+  (checklist D.18).
+- `centella.validate` reports `experimental_aia131`: the rule at its fixed
+  k, so on any new period it is an honest out-of-sample score.
+
 ## 2.3.0 — 2026-11-03
 
 Location validated against a catalogue. Model card updated with the

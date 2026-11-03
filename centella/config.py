@@ -31,6 +31,10 @@ class Settings:
     # fewest of the n_baseline frames that must be usable (validated with 3 of 3;
     # 2 of 3 keeps a slot when one baseline frame is missing, n_baseline_used says so)
     min_baseline: int = field(default_factory=lambda: int(_env("MIN_BASELINE", "2")))
+    # EXPERIMENTAL second signal, computed and stored next to the model's but never
+    # mixed into it: alert when the disk-integrated 131 Å rate rises >= k over the same
+    # baseline frames (k 3.5–4.9 % out of sample on the calibration month, model card)
+    rule131_k: float = field(default_factory=lambda: float(_env("RULE131_K", "0.04")))
 
     # input
     jsoc_base: str = field(default_factory=lambda: _env("JSOC_BASE", "https://jsoc1.stanford.edu/data/aia/synoptic"))
@@ -124,6 +128,11 @@ class Settings:
     @property
     def events_path(self) -> Path:
         return self.data_dir / "events.csv"
+
+    @property
+    def experimental_events_path(self) -> Path:
+        """Events of the experimental 131 Å rule (rule131_k), same format."""
+        return self.data_dir / "events_aia131.csv"
 
     def ensure_dirs(self) -> None:
         for d in (self.staging_dir, self.results_dir, self.archive_dir, self.state_dir,
