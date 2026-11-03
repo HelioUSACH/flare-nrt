@@ -115,6 +115,42 @@ def aia131_rule(rows: list[dict], flares: list[Flare], max_false_alarms: int, me
                                          "false_alarms", "median_min_from_start", "median_min_from_peak")}}
 
 
+def location_errors(rows: list[dict], flares: list[Flare]) -> dict:
+    """Centella's location against the catalogue position, per detected M/X
+    flare that has both: the location of the highest-probability alerting
+    slot in [tstart − 10 min, tend + 5 min] vs the flare's ``hpc``
+    (helioprojective arcsec; LMSAL "SSW Latest Events" via HEK, see
+    ``centella.goes.fetch_hek``). Distances are in arcsec on the image plane
+    (≈ 0.73 Mm per arcsec at disk centre)."""
+    big = [f for f in flares if f.flux >= class_flux("M1.0")]
+    alerting = [(parse_iso(r["slot"]), r) for r in rows
+                if r.get("alert") and r.get("location") and r["location"].get("centroid_arcsec")]
+    per = []
+    for f in big:
+        cand = [r for t, r in alerting if f.tstart - PRE <= t <= f.tend + POST_HIT]
+        if not cand or not f.hpc:
+            continue
+        r = max(cand, key=lambda r: r.get("probability") or 0)
+        x, y = r["location"]["centroid_arcsec"]
+        d = ((x - f.hpc[0]) ** 2 + (y - f.hpc[1]) ** 2) ** 0.5
+        per.append({"flare": f.flare_id, "class": f.fclass, "slot": r["slot"], "centella": [round(x), round(y)],
+                    "catalogue": [round(f.hpc[0]), round(f.hpc[1])], "distance_arcsec": round(d, 1),
+                    "on_limb": bool(r["location"].get("on_limb"))})
+    ds = sorted(p["distance_arcsec"] for p in per)
+
+    def frac(lim):
+        return round(sum(d <= lim for d in ds) / len(ds), 3) if ds else None
+
+    return {
+        "n_compared": len(ds),
+        "mx_detected_without_position": sum(1 for f in big if not f.hpc),
+        "median_arcsec": _med(ds),
+        "p75_arcsec": ds[int(0.75 * (len(ds) - 1))] if ds else None,
+        "within_60_arcsec": frac(60), "within_120_arcsec": frac(120), "within_240_arcsec": frac(240),
+        "flares": per,
+    }
+
+
 def alternation(rows: list[dict], p_max: float = 0.3, min_step: float = 0.02) -> dict:
     """The low-probability 2-frame alternation seen in 1.x: among
     consecutive ``ok`` slots below ``p_max``, the fraction of steps that
@@ -163,11 +199,13 @@ def main(argv=None) -> int:
     rep = evaluate(rows, flares, cfg.merge_gap_min)
     rep["baseline"] = aia131_rule(rows, flares, rep["false_alarms"], cfg.merge_gap_min)
     rep["alternation"] = alternation(rows)
+    rep["location"] = location_errors(rows, flares)
     txt = json.dumps(rep, indent=2)
     if a.out:
         Path(a.out).parent.mkdir(parents=True, exist_ok=True)
         Path(a.out).write_text(txt)
     summary = {k: v for k, v in rep.items() if k not in ("flares", "false_alarm_runs")}
+    summary["location"] = {k: v for k, v in rep["location"].items() if k != "flares"}
     print(json.dumps(summary, indent=2))
     return 0
 

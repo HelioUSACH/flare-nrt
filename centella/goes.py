@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from .grid import parse_datetime
@@ -33,6 +33,9 @@ class Flare:
     tpeak: dt.datetime
     tend: dt.datetime
     fclass: str
+    # helioprojective position (arcsec) when a catalogue gives one; not part of
+    # the flare's identity (equality, hashing, flare_id)
+    hpc: tuple | None = field(default=None, compare=False)
 
     @property
     def flux(self) -> float:
@@ -81,7 +84,11 @@ def read_csv(path: Path) -> list[Flare]:
         for r in csv.DictReader(fh):
             f = _valid(_t(r.get("tstart")), _t(r.get("tpeak")), _t(r.get("tend")), r.get("fclass"))
             if f:
-                out.append(f)
+                try:
+                    hpc = (float(r["hpc_x"]), float(r["hpc_y"]))
+                except (KeyError, TypeError, ValueError):
+                    hpc = None
+                out.append(replace(f, hpc=hpc))
     return sorted(set(out), key=lambda f: f.tstart)
 
 
@@ -96,31 +103,38 @@ def fetch_swpc(url: str, timeout: float = 30) -> list[Flare]:
 def write_csv(path: Path, flares: list[Flare]) -> None:
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
-        w.writerow(["flare_id", "tstart", "tpeak", "tend", "fclass", "flux_wm2"])
+        w.writerow(["flare_id", "tstart", "tpeak", "tend", "fclass", "flux_wm2", "hpc_x", "hpc_y"])
         for f in flares:
+            x, y = f.hpc if f.hpc else ("", "")
             w.writerow([f.flare_id, f.tstart.isoformat(), f.tpeak.isoformat(), f.tend.isoformat(),
-                        f.fclass, f"{f.flux:.3e}"])
+                        f.fclass, f"{f.flux:.3e}", x, y])
 
 
 HEK_URL = "https://www.lmsal.com/hek/her"
 
 
+def _hpc(r: dict) -> tuple | None:
+    try:
+        x, y = float(r["hpc_x"]), float(r["hpc_y"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return None if x == 0 and y == 0 else (round(x, 1), round(y, 1))   # (0, 0): "no position"
+
+
 def parse_hek(results: list[dict]) -> list[Flare]:
     """HEK flare events (``event_starttime``, ``event_peaktime``,
-    ``event_endtime``, ``fl_goescls``) → flares; entries without a GOES
-    class are dropped."""
+    ``event_endtime``, ``fl_goescls``, ``hpc_x``/``hpc_y``) → flares;
+    entries without a GOES class are dropped."""
     out = []
     for r in results:
         f = _valid(_t(r.get("event_starttime")), _t(r.get("event_peaktime")), _t(r.get("event_endtime")),
                    r.get("fl_goescls"))
         if f:
-            out.append(f)
+            out.append(replace(f, hpc=_hpc(r)))
     return sorted(set(out), key=lambda f: f.tstart)
 
 
-def fetch_hek(start: dt.datetime, end: dt.datetime, timeout: float = 60) -> list[Flare]:
-    """The SWPC flare list for any past period, from the Heliophysics Event
-    Knowledgebase (``FRM_NAME = SWPC``), paged 500 at a time."""
+def _hek_search(frm: str, start: dt.datetime, end: dt.datetime, timeout: float) -> list[dict]:
     import requests
 
     results, page = [], 1
@@ -130,8 +144,8 @@ def fetch_hek(start: dt.datetime, end: dt.datetime, timeout: float = 60) -> list
             "event_starttime": start.strftime("%Y-%m-%dT%H:%M:%S"),
             "event_endtime": end.strftime("%Y-%m-%dT%H:%M:%S"),
             "event_coordsys": "helioprojective", "x1": -5000, "x2": 5000, "y1": -5000, "y2": 5000,
-            "param0": "FRM_NAME", "op0": "=", "value0": "SWPC",
-            "return": "event_starttime,event_peaktime,event_endtime,fl_goescls",
+            "param0": "FRM_NAME", "op0": "=", "value0": frm,
+            "return": "event_starttime,event_peaktime,event_endtime,fl_goescls,hpc_x,hpc_y",
             "result_limit": 500, "page": page,
         }
         r = requests.get(HEK_URL, params=params, timeout=timeout, headers={"User-Agent": "Centella (HelioUSACH)"})
@@ -139,9 +153,32 @@ def fetch_hek(start: dt.datetime, end: dt.datetime, timeout: float = 60) -> list
         js = r.json()
         results += js.get("result", [])
         if not js.get("overmax") or not js.get("result"):
-            break
+            return results
         page += 1
-    return parse_hek(results)
+
+
+POSITION_MATCH = dt.timedelta(minutes=6)
+
+
+def fetch_hek(start: dt.datetime, end: dt.datetime, timeout: float = 60, positions: bool = True) -> list[Flare]:
+    """The SWPC flare list for any past period, from the Heliophysics Event
+    Knowledgebase (``FRM_NAME = SWPC``), paged 500 at a time. With
+    ``positions``, each flare's position is the one LMSAL's "SSW Latest
+    Events" (located in AIA images) gives for the same flare (peak within
+    6 min, same letter), else SWPC's own when it has one."""
+    flares = parse_hek(_hek_search("SWPC", start, end, timeout))
+    if not positions:
+        return flares
+    try:
+        lmsal = [f for f in parse_hek(_hek_search("SSW Latest Events", start, end, timeout)) if f.hpc]
+    except Exception:  # positions are a bonus: the list itself must not depend on them
+        lmsal = []
+    out = []
+    for f in flares:
+        near = [g for g in lmsal if abs(g.tpeak - f.tpeak) <= POSITION_MATCH and g.letter == f.letter]
+        best = min(near, key=lambda g: abs(g.tpeak - f.tpeak)) if near else None
+        out.append(replace(f, hpc=best.hpc if best else f.hpc))
+    return out
 
 
 def main(argv=None) -> None:
@@ -163,7 +200,9 @@ def main(argv=None) -> None:
     by = {}
     for f in flares:
         by[f.letter] = by.get(f.letter, 0) + 1
-    print(f"{len(flares)} flares → {a.out}  ({', '.join(f'{k}: {v}' for k, v in sorted(by.items()))})")
+    located = sum(1 for f in flares if f.hpc)
+    print(f"{len(flares)} flares → {a.out}  ({', '.join(f'{k}: {v}' for k, v in sorted(by.items()))}; "
+          f"{located} with a position)")
 
 
 if __name__ == "__main__":

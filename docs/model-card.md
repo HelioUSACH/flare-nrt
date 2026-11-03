@@ -159,7 +159,9 @@ will be updated from those reports.
   of consecutive low-probability steps that reverse sign; ~0.5 for noise,
   ~1 for strict alternation).
 - **Location is experimental.** It is the brightest region of the 131 Å
-  difference, not yet validated against catalogue positions.
+  difference. Since 2.3, `centella.validate` measures its distance to the
+  catalogue position (LMSAL "SSW Latest Events" via HEK) for each detected
+  M/X flare; the calibration month's numbers are pending.
 
 ## Maintainers / links
 

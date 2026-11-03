@@ -128,11 +128,71 @@ def test_hek_flare_list(monkeypatch, tmp_path):
             return self.js
 
     def get(url, params, **kw):
-        seen.append(params["page"])
-        return R(pages[params["page"] - 1])
+        seen.append((params["value0"], params["page"]))
+        return R(pages[params["page"] - 1] if params["value0"] == "SWPC" else {"result": []})
 
     monkeypatch.setattr(requests, "get", get)
     out = tmp_path / "f.csv"
     goes.main(["--start", "2026-07-04", "--end", "2026-07-05", "--out", str(out)])
-    assert seen == [1, 2]
+    assert seen == [("SWPC", 1), ("SWPC", 2), ("SSW Latest Events", 1)]
     assert [f.fclass for f in goes.read_csv(out)] == ["M2.3", "C1.1"]
+
+
+
+def test_hek_positions_come_from_lmsal_matched_by_peak(monkeypatch, tmp_path):
+    import requests
+
+    from centella import goes
+
+    swpc = [  # SWPC: class and times; one with its own position, one with (0, 0) = none
+        {"event_starttime": "2026-07-04T11:38:00", "event_peaktime": "2026-07-04T11:52:00",
+         "event_endtime": "2026-07-04T12:10:00", "fl_goescls": "M2.3", "hpc_x": 0, "hpc_y": 0},
+        {"event_starttime": "2026-07-04T15:00:00", "event_peaktime": "2026-07-04T15:05:00",
+         "event_endtime": "2026-07-04T15:12:00", "fl_goescls": "M1.0", "hpc_x": -310.0, "hpc_y": 120.0},
+        {"event_starttime": "2026-07-04T18:00:00", "event_peaktime": "2026-07-04T18:05:00",
+         "event_endtime": "2026-07-04T18:12:00", "fl_goescls": "C2.0", "hpc_x": 0, "hpc_y": 0}]
+    lmsal = [  # LMSAL: positions from AIA; the M2.3 peaks 3 min off, a C nearby must not be taken
+        {"event_starttime": "2026-07-04T11:40:00", "event_peaktime": "2026-07-04T11:55:00",
+         "event_endtime": "2026-07-04T12:05:00", "fl_goescls": "M2.2", "hpc_x": 854.2, "hpc_y": 303.4},
+        {"event_starttime": "2026-07-04T11:45:00", "event_peaktime": "2026-07-04T11:51:00",
+         "event_endtime": "2026-07-04T11:58:00", "fl_goescls": "C5.0", "hpc_x": -500.0, "hpc_y": -500.0}]
+
+    class R:
+        def __init__(self, js):
+            self.js = js
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.js
+
+    monkeypatch.setattr(requests, "get",
+                        lambda url, params, **kw: R({"result": swpc if params["value0"] == "SWPC" else lmsal}))
+    fl = {f.fclass: f for f in goes.fetch_hek(goes.dt.datetime(2026, 7, 4, tzinfo=goes.dt.timezone.utc),
+                                               goes.dt.datetime(2026, 7, 5, tzinfo=goes.dt.timezone.utc))}
+    assert fl["M2.3"].hpc == (854.2, 303.4)           # LMSAL, same letter, nearest peak
+    assert fl["M1.0"].hpc == (-310.0, 120.0)           # no LMSAL match: SWPC's own
+    assert fl["C2.0"].hpc is None                      # (0, 0) means no position
+    out = tmp_path / "f.csv"
+    goes.write_csv(out, list(fl.values()))
+    back = {f.fclass: f for f in goes.read_csv(out)}
+    assert back["M2.3"].hpc == (854.2, 303.4) and back["C2.0"].hpc is None
+    assert back["M2.3"] == fl["M2.3"]                   # position is not part of identity
+
+
+def test_location_errors_against_catalogue():
+    from dataclasses import replace
+
+    from centella.validate import location_errors
+
+    f1 = replace(fl(60, 64, 70, "M2.0"), hpc=(500.0, -200.0))
+    f2 = replace(fl(200, 204, 210, "M1.0"), hpc=None)
+    rows = []
+    for m, p, loc in ((60, 0.85, [560, -200]), (62, 0.97, [520, -210]), (202, 0.9, [0, 0])):
+        rows.append({"slot": (D + m * M).strftime("%Y-%m-%dT%H:%M:%SZ"), "status": "ok", "alert": True,
+                     "probability": p, "location": {"centroid_arcsec": loc, "on_limb": False}})
+    r = location_errors(rows, [f1, f2])
+    assert r["n_compared"] == 1 and r["mx_detected_without_position"] == 1
+    assert r["flares"][0]["centella"] == [520, -210]           # the highest-probability alert
+    assert abs(r["median_arcsec"] - 22.4) < 0.1 and r["within_60_arcsec"] == 1.0

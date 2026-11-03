@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.3.0 — 2026-11-03
+
+Location validated against a catalogue.
+
+- `python -m centella.goes` now writes flare positions (`hpc_x`, `hpc_y`,
+  helioprojective arcsec). Each SWPC flare takes the position LMSAL's "SSW
+  Latest Events" gives in AIA for the same flare (peak within 6 min, same
+  letter), else SWPC's own; (0, 0) means none. `Flare.hpc` is not part of a
+  flare's identity.
+- `centella.validate` reports `location`: for each detected M/X flare with
+  a position, the distance between Centella's location at its
+  highest-probability alert and the catalogue (median, p75, fractions
+  within 60/120/240″).
+
 ## 2.2.1 — 2026-11-02
 
 - `/api/flares` adds SWPC's 7-day list for windows that reach the last 7
