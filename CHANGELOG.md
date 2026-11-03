@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.4.1 — 2026-11-03
+
+- The experimental 131 Å rule added in 2.4.0 is removed (owner's
+  decision: the product is the neural network only). Results, status and
+  events are exactly as in 2.3.0; `events_aia131.csv` files left by 2.4.0
+  are no longer read.
+
+## 2.4.0 — 2026-11-03 (withdrawn)
+
+Ran the 131 Å rule live as an experimental signal next to the model's.
+Withdrawn in 2.4.1.
+
 ## 2.3.0 — 2026-11-03
 
 Location validated against a catalogue. Model card updated with the
