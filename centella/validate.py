@@ -115,23 +115,6 @@ def aia131_rule(rows: list[dict], flares: list[Flare], max_false_alarms: int, me
                                          "false_alarms", "median_min_from_start", "median_min_from_peak")}}
 
 
-def experimental_rule(rows: list[dict], flares: list[Flare], k: float, merge_gap_min: int = 10) -> dict:
-    """The EXPERIMENTAL signal as it runs (fixed ``k``, CENTELLA_RULE131_K),
-    scored with the same rules: unlike ``aia131_rule`` its k is not fitted on
-    the period, so this is an honest out-of-sample number on any new period.
-    Works on any rows with ``aia131_excess`` (2.1+)."""
-    if not any(r.get("aia131_excess") is not None for r in rows):
-        return {"available": False}
-    rep = evaluate([dict(r, alert=r.get("status") == "ok" and (r.get("aia131_excess") or -1) >= k) for r in rows],
-                   flares, merge_gap_min)
-    ok = sum(1 for r in rows if r.get("status") == "ok")
-    on = sum(1 for r in rows if r.get("status") == "ok" and (r.get("aia131_excess") or -1) >= k)
-    return {"available": True, "k": k, "time_alerting": round(on / ok, 4) if ok else None,
-            **{key: rep[key] for key in ("mx_evaluable", "mx_detected", "pod_mx", "pod_ge_m2", "pod_m1_m2",
-                                         "false_alarms", "false_alarms_per_day", "alert_runs",
-                                         "median_min_from_start", "median_min_from_peak")}}
-
-
 def location_errors(rows: list[dict], flares: list[Flare]) -> dict:
     """Centella's location against the catalogue position, per detected M/X
     flare that has both: the location of the highest-probability alerting
@@ -215,7 +198,6 @@ def main(argv=None) -> int:
     flares = read_csv(Path(a.flares_csv)) if a.flares_csv else fetch_swpc(cfg.goes_url)
     rep = evaluate(rows, flares, cfg.merge_gap_min)
     rep["baseline"] = aia131_rule(rows, flares, rep["false_alarms"], cfg.merge_gap_min)
-    rep["experimental_aia131"] = experimental_rule(rows, flares, cfg.rule131_k, cfg.merge_gap_min)
     rep["alternation"] = alternation(rows)
     rep["location"] = location_errors(rows, flares)
     txt = json.dumps(rep, indent=2)

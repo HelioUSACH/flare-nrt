@@ -57,12 +57,6 @@ def aia131_excess(cur, bls) -> float | None:
     return round(float(np.nansum(cur)) / ref - 1.0, 6) if ref > 0 else None
 
 
-def xalert_of(row: dict, k: float) -> bool:
-    """The experimental 131 Å rule on one result row."""
-    x = row.get("aia131_excess")
-    return x is not None and x >= k
-
-
 def signal_state(opened: bool, alert: bool, is_open: bool) -> str:
     """What the public signal is doing at this slot:
 
@@ -99,9 +93,6 @@ class Processor:
         self.rate131: dict = {}
         st = read_json(cfg.loop_state_path, {}) or {}
         self.tracker = EventTracker(cfg.merge_gap_min, st.get("last_id", 0), st.get("current"))
-        # EXPERIMENTAL: the 131 Å rule's own events (model card, "aia131_rise"); never
-        # feeds probability, alert, state or flare_detected
-        self.xtracker = EventTracker(cfg.merge_gap_min, st.get("x_last_id", 0), st.get("x_current"))
         self.results = ResultStore(cfg.results_dir)
         self.frame_count = 0
         self.artifacts = Artifacts(cfg, ensemble, enabled=live)
@@ -140,7 +131,6 @@ class Processor:
         cur = self.current(slot)
         alert = False
         prob = None
-        xloc = None   # location at a slot where the experimental 131 Å rule alerts
         if cur is MISSING:
             row.update(status="missing", reason="channels_missing",
                        channels_missing=self.src.missing_channels(slot))
@@ -167,14 +157,11 @@ class Processor:
                 prob, scores = self.ens.predict(x)
                 latency_ms = round(1000 * (time.perf_counter() - t0))
                 alert = is_alert(prob, cfg.threshold)
-                excess = aia131_excess(self.rate131.get(slot), [self.rate131.get(s) for s in used])
-                row["aia131_excess"] = excess
-                xalert = excess is not None and excess >= cfg.rule131_k
                 loc = None
-                if (alert or xalert) and slot in self.rate131 and all(s in self.rate131 for s in used):
+                if alert and slot in self.rate131 and all(s in self.rate131 for s in used):
                     diff = self.rate131[slot] - sum(self.rate131[s] for s in used) / len(used)
-                    xloc = localize(diff, self.headers.get(slot, {}))
-                    loc = xloc if alert else None
+                    loc = localize(diff, self.headers.get(slot, {}))
+                row["aia131_excess"] = aia131_excess(self.rate131.get(slot), [self.rate131.get(s) for s in used])
                 row.update(status="ok", probability=round(prob, 6), raw_score=round(prob, 6), alert=alert,
                            ensemble_scores=[round(v, 6) for v in scores],
                            ensemble_std=round(statistics.pstdev(scores), 6),
@@ -185,16 +172,6 @@ class Processor:
                     row["data_latency_s"] = round((now - slot).total_seconds())
                 self.frame_count += 1
                 self.artifacts.save(slot, x, cur, alert, gradcam=alert or self.gradcam_wanted, probability=prob)
-        xalert = row.get("status") == "ok" and xalert_of(row, cfg.rule131_k)
-        xev, xopened, xclosed = self.xtracker.update(slot, xalert, row.get("aia131_excess") or 0.0,
-                                                     xloc if xalert else None)
-        if xclosed:
-            append_event(cfg.experimental_events_path, xclosed)
-        if row.get("status") == "ok":
-            row["experimental"] = {"aia131_rule": {
-                "label": "experimental: not part of the model's signal", "k": cfg.rule131_k,
-                "excess": row.get("aia131_excess"), "alert": xalert, "event_id": xev,
-                "location": xloc if xalert else None}}
         ev_id, opened, closed = self.tracker.update(slot, alert, prob or 0.0, row.get("location"))
         if closed:
             append_event(cfg.events_path, closed)
@@ -205,7 +182,7 @@ class Processor:
         row["state"] = signal_state(opened, alert, self.tracker.current is not None)
         row["event_id"] = ev_id
         self.results.append(row)
-        write_json_atomic(cfg.loop_state_path, {"last_slot": iso(slot), **self.tracker.state(), **self._xstate()})
+        write_json_atomic(cfg.loop_state_path, {"last_slot": iso(slot), **self.tracker.state()})
         write_json_atomic(cfg.state_dir / "last_frame.json",
                           {k: row.get(k) for k in ("slot", "made_at", "status", "reason", "qc",
                                                    "channels_missing", "baseline_missing",
@@ -214,14 +191,8 @@ class Processor:
             self._write_status(row)
         return row
 
-    def _xstate(self) -> dict:
-        st = self.xtracker.state()
-        return {"x_last_id": st["last_id"], "x_current": st["current"]}
-
     def _write_status(self, row: dict) -> None:
         open_ev = self.tracker.current
-        xr = (row.get("experimental") or {}).get("aia131_rule") or {}
-        xopen = self.xtracker.current
         status = {
             "status": "running",
             "model": "Centella",
@@ -252,16 +223,6 @@ class Processor:
             "loop_errors": self.errors,
             "loop_last_error": self.last_error[1] if self.last_error else None,
             "loop_last_error_ts": self.last_error[0] if self.last_error else None,
-            # labelled and kept apart from the signal above (checklist D.18)
-            "experimental": {"aia131_rule": {
-                "label": "experimental: not part of the model's signal",
-                "rule": "disk-integrated 131 Å rate ≥ (1 + k) × mean of the same baseline frames",
-                "k": self.cfg.rule131_k, "excess": xr.get("excess"), "alert": xr.get("alert", False),
-                "flare_detected": xopen is not None,
-                "event_id": xopen.event_id if xopen else None,
-                "event_t_start": xopen.t_start if xopen else None,
-                "location": xr.get("location") or (xopen.location if xopen else None),
-            }},
         }
         write_json_atomic(self.cfg.status_path, status)
 
@@ -270,10 +231,7 @@ class Processor:
         ev = self.tracker.close()
         if ev:
             append_event(self.cfg.events_path, ev)
-        xev = self.xtracker.close()
-        if xev:
-            append_event(self.cfg.experimental_events_path, xev)
-        write_json_atomic(self.cfg.loop_state_path, {"last_slot": None, **self.tracker.state(), **self._xstate()})
+        write_json_atomic(self.cfg.loop_state_path, {"last_slot": None, **self.tracker.state()})
 
 
 def should_skip(src, slot: dt.datetime, now: dt.datetime, cfg: Settings,
