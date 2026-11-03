@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.1 — 2026-11-02
+
+- `/api/flares` adds SWPC's 7-day list for windows that reach the last 7
+  days. The curated archive only covers days up to yesterday, so live pages
+  were missing today's flares. The list is fetched at most every 10 min and
+  the last good copy is kept on failure; `source` says `archive+swpc`.
+
 ## 2.2.0 — 2026-11-02
 
 Retrospective viewer and past-period replays. `/api/status` is unchanged.

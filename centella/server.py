@@ -38,7 +38,7 @@ from . import __version__
 from .artifacts import gradcam_path
 from .config import Settings
 from .detector import baseline_slots
-from .goes import class_flux, read_csv
+from .goes import class_flux, fetch_swpc, read_csv
 from .grid import CADENCE, CHANNELS, day_key, file_name, iso, parse_datetime, parse_file_name, parse_iso, utcnow
 from .store import ResultStore, read_events, read_json
 
@@ -323,6 +323,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         return {"slot": iso(s), "row": row, "images": images, "differences": diffs, "gradcam": cam}
 
     flare_cache: dict = {"key": None, "flares": []}
+    swpc_cache: dict = {"at": 0.0, "flares": []}
 
     def _flares():
         srcs = [Path(cfg.flares_csv)] if cfg.flares_csv else sorted(cfg.archive_dir.glob("*/*/*/flares.csv"))
@@ -335,14 +336,33 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             flare_cache.update(key=key, flares=sorted(out.values(), key=lambda f: f.tstart))
         return flare_cache["flares"]
 
+    def _swpc_recent():
+        """SWPC's 7-day list, for the days curation hasn't reached yet;
+        fetched at most every 10 min, the last good copy kept on failure."""
+        if time.time() - swpc_cache["at"] > 600:
+            swpc_cache["at"] = time.time()
+            try:
+                swpc_cache["flares"] = fetch_swpc(cfg.goes_url, timeout=10)
+            except Exception:  # no network, SWPC down: the archive's lists still answer
+                pass
+        return swpc_cache["flares"]
+
     @app.get("/api/flares")
     def flares(start: str | None = None, end: str | None = None, days: float = Query(3, gt=0, le=40)):
         """GOES flares (C and above) in a window, for comparison:
-        ``CENTELLA_FLARES_CSV`` if set, else the curated archive's lists."""
+        ``CENTELLA_FLARES_CSV`` if set; else the curated archive's lists plus
+        SWPC's 7-day list when the window reaches the last 7 days."""
         since, until = _window(start, end, days, 40)
-        return {"source": cfg.flares_csv or "archive", "flares": [
+        pool = {f.flare_id: f for f in _flares()}
+        source = cfg.flares_csv or "archive"
+        if not cfg.flares_csv and until >= utcnow() - dt.timedelta(days=7):
+            for f in _swpc_recent():
+                pool.setdefault(f.flare_id, f)
+            source = "archive+swpc"
+        return {"source": source, "flares": [
             {"id": f.flare_id, "class": f.fclass, "tstart": iso(f.tstart), "tpeak": iso(f.tpeak), "tend": iso(f.tend)}
-            for f in _flares() if f.tend >= since and f.tstart <= until and f.flux >= class_flux("C1.0")]}
+            for f in sorted(pool.values(), key=lambda f: f.tstart)
+            if f.tend >= since and f.tstart <= until and f.flux >= class_flux("C1.0")]}
 
     @app.get("/viewer", response_class=HTMLResponse)
     def viewer():

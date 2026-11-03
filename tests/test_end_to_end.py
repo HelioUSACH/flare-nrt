@@ -411,3 +411,29 @@ def test_replay_resume_skips_done_slots(cfg, tmp_path):
     n = len(ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}"))
     proc = run(cfg, replay_dir=fits, replay_gradcam=False, resume=True)
     assert proc.frame_count == 0 and len(ResultStore(cfg.results_dir).read_day(f"{T0:%Y%m%d}")) == n == 8
+
+
+def test_live_flares_add_swpc_recent_list(cfg, monkeypatch):
+    """Live: the curated archive covers up to yesterday; SWPC's 7-day list
+    fills the recent days (and its failure is not the API's)."""
+    import centella.server as srv
+    from centella.goes import Flare
+
+    now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
+    recent = Flare(now - dt.timedelta(hours=3), now - dt.timedelta(hours=2, minutes=50),
+                   now - dt.timedelta(hours=2, minutes=40), "M1.4")
+    calls = []
+    monkeypatch.setattr(srv, "fetch_swpc", lambda url, timeout=30: calls.append(url) or [recent])
+    c = TestClient(create_app(cfg))
+    r = c.get("/api/flares?days=1").json()
+    assert r["source"] == "archive+swpc" and [f["class"] for f in r["flares"]] == ["M1.4"]
+    c.get("/api/flares?days=1")
+    assert len(calls) == 1                                   # cached 10 min
+    old = c.get("/api/flares?start=2026-06-19T00:00:00Z&end=2026-06-20T00:00:00Z").json()
+    assert old["source"] == "archive" and old["flares"] == []
+
+    def down(url, timeout=30):
+        raise OSError("no network")
+
+    monkeypatch.setattr(srv, "fetch_swpc", down)
+    assert TestClient(create_app(cfg)).get("/api/flares?days=1").status_code == 200
