@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.5.0 — 2026-11-04
+
+- `location` adds `bbox_arcsec` [x0, y0, x1, y1]: the bounding box of the
+  detected region in helioprojective arcsec (x west, y north). Pages use it
+  to draw a box around the flare. Additive: the other fields are unchanged.
+
 ## 2.4.1 — 2026-11-03
 
 - The experimental 131 Å rule added in 2.4.0 is removed (owner's

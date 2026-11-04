@@ -27,3 +27,14 @@ def test_flare_under_short_exposure_is_found_north_west():
 def test_no_brightening_gives_no_location():
     base = rate_map(_sun().astype(np.float32), HDR)
     assert localize(base - base, HDR) is None
+
+
+def test_bounding_box_encloses_the_flare_and_its_centroid():
+    base = rate_map(_sun().astype(np.float32), HDR)
+    loc = localize(rate_map(_sun(flare=3000.0).astype(np.float32), HDR) - base, HDR)
+    x0, y0, x1, y1 = loc["bbox_arcsec"]
+    cx, cy = loc["centroid_arcsec"]
+    assert x0 < cx < x1 and y0 < cy < y1
+    # a Gaussian of sigma 10 px (24″): the half-max region is ~2.4 sigma wide ≈ 57″, plus smoothing
+    assert 30 < x1 - x0 < 150 and 30 < y1 - y0 < 150
+    assert x0 > 0 and y0 > 0                       # all of it north-west of centre

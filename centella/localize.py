@@ -57,10 +57,21 @@ def localize(diff: np.ndarray | torch.Tensor, header: dict, src_size: int | None
     rsun = float(header.get("RSUN_OBS", 960.0) or 960.0)
     rad = float(np.hypot(xa, ya))
     area_px = int(region.sum())
+    # the region's bounding box, pixel edges → helioprojective arcsec (x grows west,
+    # y north: rows are FITS rows, so the first row is the south edge)
+    rr, cc = np.nonzero(region)
+
+    def hpc(col_edge: float, row_edge: float) -> tuple[float, float]:
+        return ((col_edge * scale + 0.5 - float(header.get("CRPIX1", src_size / 2 + 0.5))) * cdelt1,
+                (row_edge * scale + 0.5 - float(header.get("CRPIX2", src_size / 2 + 0.5))) * cdelt2)
+
+    x0, y0 = hpc(float(cc.min()), float(rr.min()))
+    x1, y1 = hpc(float(cc.max()) + 1, float(rr.max()) + 1)
     return {
         "centroid_arcsec": [round(xa, 1), round(ya, 1)],
         "area_px": area_px,
         "area_arcsec2": round(area_px * (cdelt1 * scale) * (cdelt2 * scale), 1),
+        "bbox_arcsec": [round(min(x0, x1), 1), round(min(y0, y1), 1), round(max(x0, x1), 1), round(max(y0, y1), 1)],
         "on_limb": bool(rad > 0.9 * rsun),
         "method": "diff131_rate_brightest_region",
         "confidence": "experimental",

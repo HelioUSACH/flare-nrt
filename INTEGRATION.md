@@ -44,7 +44,7 @@ UTC with `Z`.
 | `alert` | bool | | `probability ≥ threshold` for this slot |
 | `threshold` | number | 1 | 0.80 |
 | `event_id`, `event_t_start` | integer / ISO `Z`, or null | | the open event |
-| `location` | object or null | | **experimental**: `centroid_arcsec` [x, y] helioprojective, `area_px`, `area_arcsec2`, `on_limb`, `method`, `confidence: "experimental"`. Only while an event is open |
+| `location` | object or null | | **experimental**: `centroid_arcsec` [x, y] helioprojective, `bbox_arcsec` [x0, y0, x1, y1] (the region's bounding box, 2.5+), `area_px`, `area_arcsec2`, `on_limb`, `method`, `confidence: "experimental"`. Only while an event is open |
 | `ensemble_scores` | list of number | 1 | the 5 members' probabilities |
 | `ensemble_std` | number | 1 | their standard deviation |
 | `lag_min`, `baseline_slots`, `baseline_missing`, `n_baseline_used` | | min / ISO lists / int | the baseline frames actually used (t−8, −10, −12 min; at least 2 of 3) |
