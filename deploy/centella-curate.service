@@ -1,0 +1,20 @@
+# Example unit: daily curation of the previous UTC day(s) into the archive.
+[Unit]
+Description=Centella daily curation (archive for retraining) + retention
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=centella
+Group=centella
+WorkingDirectory=/opt/centella
+EnvironmentFile=/etc/centella/centella.env
+ExecStart=/opt/centella/.venv/bin/python -m centella.curate
+Nice=10
+CPUQuota=100%
+MemoryMax=1G
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/centella
+PrivateTmp=true

@@ -1,0 +1,25 @@
+# Example unit: the status API the portal polls (127.0.0.1 only).
+[Unit]
+Description=Centella status API (127.0.0.1:5050)
+After=network.target
+
+[Service]
+Type=simple
+User=centella
+Group=centella
+WorkingDirectory=/opt/centella
+EnvironmentFile=/etc/centella/centella.env
+ExecStart=/opt/centella/.venv/bin/uvicorn centella.server:app --host 127.0.0.1 --port 5050 --workers 1
+Restart=always
+RestartSec=5
+CPUQuota=100%
+MemoryMax=512M
+NoNewPrivileges=true
+ProtectSystem=strict
+# reads everything; writes only its PNG preview cache
+ReadOnlyPaths=/srv/centella
+ReadWritePaths=/srv/centella/cache
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+# Example unit (checklist F.29). The maintainers install it; paths are settings.
+[Unit]
+Description=Centella detection loop (AIA synoptic → usach.flare.nrt)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=centella
+Group=centella
+WorkingDirectory=/opt/centella
+EnvironmentFile=/etc/centella/centella.env
+ExecStart=/opt/centella/.venv/bin/python -m centella.loop
+# logs go to stdout/stderr → journald (journalctl -u centella-loop)
+Restart=always
+RestartSec=30
+# Budget on the shared server (measured: ~1.2 GB peak RSS, ~21 s CPU per
+# frame on 2 vCPU incl. Grad-CAM; INTEGRATION.md "Resources")
+CPUQuota=200%
+MemoryMax=3G
+Nice=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/centella
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

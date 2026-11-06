@@ -1,0 +1,12 @@
+# SWPC's flare list for a day is complete a few hours after it ends:
+# run at 04:20 UT for every uncurated day before today.
+[Unit]
+Description=Centella daily curation
+
+[Timer]
+OnCalendar=*-*-* 04:20:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
