@@ -40,14 +40,21 @@ CENTELLA_NORM_STATS=/srv/centella/metadata/global_norm_stats.json
 
 ## Install (maintainers)
 
+As root, in this order:
+
 ```bash
-git clone --branch vX.Y.Z https://github.com/HelioUSACH/flare-nrt.git /opt/centella
+git clone --branch v2.5.0 https://github.com/HelioUSACH/flare-nrt.git /opt/centella
 cd /opt/centella && python3 -m venv .venv
 .venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
 .venv/bin/pip install -r requirements.lock.txt && .venv/bin/pip install --no-deps .
+id centella >/dev/null 2>&1 || useradd --system --home /srv/centella --shell /usr/sbin/nologin centella
 install -d -o centella -g centella /srv/centella
-sudo -u centella .venv/bin/python -m centella.fetch_weights --dest /srv/centella
-install -D -m 644 .env.example /etc/centella/centella.env   # then set the three paths above
+sudo -u centella .venv/bin/python -m centella.fetch_weights --dest /srv/centella   # SHA-256 checked
+install -D -m 644 .env.example /etc/centella/centella.env
+sed -i -e 's#^CENTELLA_DATA_DIR=.*#CENTELLA_DATA_DIR=/srv/centella#' \
+       -e 's#^CENTELLA_WEIGHTS=.*#CENTELLA_WEIGHTS=/srv/centella/models/deployment_ensemble_thr058.pt#' \
+       -e 's#^CENTELLA_NORM_STATS=.*#CENTELLA_NORM_STATS=/srv/centella/metadata/global_norm_stats.json#' \
+       /etc/centella/centella.env
 cp deploy/*.service deploy/*.timer /etc/systemd/system/ && systemctl daemon-reload
 systemctl enable --now centella-loop centella-api centella-curate.timer centella-validate.timer
 curl -s 127.0.0.1:5050/api/status | python3 -m json.tool | head
