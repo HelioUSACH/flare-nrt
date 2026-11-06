@@ -1,0 +1,284 @@
+From 21a03020b33b61f4749af6aacfb88214ed5b89dd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Nicol=C3=A1s=20Campos?= <nicolas.campos.a@usach.cl>
+Date: Mon, 26 Oct 2026 22:04:20 -0300
+Subject: [PATCH 2/3] flare: the producer model is named Centella (D-099)
+
+Manifest producer -> centella-loop.service / HelioUSACH/centella, provenance
+centella@<version>, heartbeat details and docs renamed. Product id
+usach.flare.nrt unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019TiLZJK6V4V5hFsgBRSyAK
+---
+ docs/ARCHITECTURE.md                            |  4 ++--
+ docs/DECISIONS.md                               |  1 +
+ docs/models/INTEGRATION.md                      |  6 +++---
+ docs/products/usach.flare.nrt.md                | 17 +++++++++--------
+ modules/flare/adapters.py                       | 11 ++++++-----
+ modules/flare/client.py                         |  2 +-
+ modules/flare/collectors.py                     | 10 +++++-----
+ modules/flare/manifests/nrt.yaml                |  6 +++---
+ .../flare/tests/fixtures/status_live_v2.json    |  1 +
+ modules/flare/tests/test_adapters.py            |  4 ++--
+ 10 files changed, 33 insertions(+), 29 deletions(-)
+
+diff --git a/docs/ARCHITECTURE.md b/docs/ARCHITECTURE.md
+index 619d4f0..a3f0ed6 100644
+--- a/docs/ARCHITECTURE.md
++++ b/docs/ARCHITECTURE.md
+@@ -46,7 +46,7 @@ Espacial**, delivering products to it through a versioned interface, and
+  ───────                      ──────────────────                       ───────────────                       ─────────
+  NOAA SWPC JSON ─┐            collector: swpc.*     (timer, 1 min) ─┐
+  Kyoto WDC / GFZ ├ adapters ► collector: indices     (timer)        │   ┌───────────────────────────┐
+- JSOC / SDO      │            service:   flare-nrt   (loop, 3 min) ─┼─► │ PRODUCT STORE             │ ─► Web portal (public, ES/EN)
++ JSOC / SDO      │            service:   Centella    (loop, 2 min) ─┼─► │ PRODUCT STORE             │ ─► Web portal (public, ES/EN)
+  future sources  ┘            future collectors/services             │   PostgreSQL 16              │ ─► HAPI + CSV + forecast export (v0.5.0)
+                                                                       │   • product registry          │ ─► JSON feeds (events, status)
+                                                                       │   • time series (partitioned) │ ─► Exchange adapters ─► Plataforma Nacional
+@@ -71,7 +71,7 @@ maturity: beta                 # experimental | beta | operational
+ cadence: 180s
+ stale_after: 15m
+ delayed_after: 2d              # optional, D-085: healthy but data older than this -> "al día · con retraso"
+-producer: {type: service, unit: swx-flare-loop, repo: HelioUSACH/flare-nrt}
++producer: {type: service, unit: centella-loop.service, repo: HelioUSACH/centella}
+ source:
+   provider: "HelioUSACH (USACH)"
+   inputs: ["SDO/AIA synoptic via JSOC"]
+diff --git a/docs/DECISIONS.md b/docs/DECISIONS.md
+index dd1e05d..40d2f89 100644
+--- a/docs/DECISIONS.md
++++ b/docs/DECISIONS.md
+@@ -104,3 +104,4 @@ record for this repository; propose a change as a PR that adds a new entry
+ | D-096 | 2026-10-25 | **Flare collector (`modules/flare/`): three rules.** (1) **No duplicates:** a result whose `issued` (the producer's `timestamp`) is already stored as a `usach.flare.nrt` event is not published again; the heartbeat stays `ok` (the producer updates every ~3 min, the collector polls every minute). swxkit has no such helper, so the check (a read of `Event`) is in the collector; no core change. (2) **A dead model must not look healthy:** the producer's `live_status` decides: `live` → publish (if new), heartbeat `ok`; `stale` → heartbeat `stale` with the producer's `seconds_since_update` in the detail, nothing published; `no_data`, `unknown`, missing or unrecognised → `no_data`, nothing published; `error` → heartbeat `error`. (3) **Times:** a `timestamp` without a timezone (what the producer sends today) is UTC; `Z` and offsets are still accepted and converted to UTC. | Before this, every poll stored the same result again, and a producer whose loop had stopped kept the product green as long as its HTTP server answered. | Victor / Claude |
+ | D-097 | 2026-10-25 | **Chart ranges, caption and headline belong to the product (`web/charts.py` `ChartSpec`).** A product's `ChartSpec` (default `DEFAULT_CHART`, overridden in `PRODUCT_CHARTS`) declares its range buttons, the default range, an optional caption and whether it is `daily`. `RANGE_CHOICES` gains `30d`, `90d`, `1y` and `all` ("todo", the whole store; always enabled, never chosen as the fallback default), offered only by products that declare them; `serie.json` accepts only the product's own ranges, anything else is its default. Buckets: 30 d 1 h, 90 d 3 h, 1 y and all 1 day, so a daily series is never averaged. `DAILY_CHART` (`noaa.goes.electron_fluence`): 30 días / 90 días / 1 año / todo, default 90 días (the coverage rule still applies: until 90 days are stored it opens on 30 días), caption "valores diarios (días UTC completos)" / "daily values (complete UTC days)" instead of "promedios de N min", and its latest datum reads "día 21/10" / "day 21 Oct", in the chart meta and under the headline (always, delayed or not), never a time. Any line with ≤ 60 values draws a marker on each one. | The fluence page offered 6 h–7 días (two points at its default, nothing at 6 h and 1 día), called its daily values 5-min averages and dated them 00:00 UT. | Victor / Claude |
+ | D-098 | 2026-10-26 | **Flare collector reads flare-nrt 2.0 (`modules/flare/`).** When the producer's `/api/status` carries `observation_time`, it becomes the event's `valid_from` (the AIA slot the result is about); `issued` stays the producer's `timestamp`, so D-096's de-duplication is unchanged. `alert` and `event_id` are added to the payload, `model_version` and `data_latency_s` to `quality`, and `provenance` = `{"producer": "flare-nrt@<version>", "inputs": ["aia.synoptic <slot>"]}`. A 1.x payload parses exactly as before. The manifest is unchanged (`stale_after: 10m` = the producer's `STALE_AFTER_SEC` 600; it now updates every 2 min). The model card at `docs/products/usach.flare.nrt.md` is the producer's 2.0 card. | A result is made minutes after its observation (JSOC latency, now reported as `data_latency_s`); plotting it at processing time shifts every detection relative to the GOES curve it is read against. | Nicolás / Claude |
++| D-099 | 2026-10-26 | **The flare model is named Centella.** Its repository becomes `HelioUSACH/centella` (renamed from `flare-nrt`; GitHub redirects the old name), its units `centella-*.service`, and `provenance.producer` reads `centella@<version>`. The product id stays **`usach.flare.nrt`**: it names the product (flare detection, NRT), is already stored, exported and offered to the national platform, and a model can be replaced under it without breaking consumers. The manifest's `producer` field is updated accordingly; titles are unchanged. | Owner's decision. | Nicolás / Claude |
+diff --git a/docs/models/INTEGRATION.md b/docs/models/INTEGRATION.md
+index 10fa7aa..9270c3a 100644
+--- a/docs/models/INTEGRATION.md
++++ b/docs/models/INTEGRATION.md
+@@ -43,7 +43,7 @@ product contract everything else in this repo already follows:
+    than the producer's own staleness threshold if it publishes one (so this
+    repo's heartbeat tracks, not fights, the producer's own notion of
+    "stale") — `modules/flare/manifests/nrt.yaml` picks `10m` to match
+-   flare-nrt's own `STALE_AFTER_SEC`. Never republish a field the model
++   Centella's own `STALE_AFTER_SEC`. Never republish a field the model
+    itself flags as exploratory/low-confidence as if it were a validated
+    signal (01-AUDIT.md §3.6 — `modules/flare/adapters.py` deliberately drops
+    `severity` for exactly this reason). A product whose producer isn't
+@@ -53,7 +53,7 @@ product contract everything else in this repo already follows:
+ 
+ ## Worked example: `modules/flare/`
+ 
+-Polls `HelioUSACH/flare-nrt`'s internal `/api/status` (never exposed by
++Polls Centella's (`HelioUSACH/centella`) internal `/api/status` (never exposed by
+ nginx — docs/ARCHITECTURE.md §6) every minute and republishes
+ `probability`/`flare_detected`/`location` as a `usach.flare.nrt` event. If
+ the service isn't reachable, the collector marks the heartbeat `error`
+@@ -61,7 +61,7 @@ instead of crashing, and the portal's beta card falls back to "en
+ preparación" (D-036) — launch was never blocked on this model being ready.
+ 
+ The producer's own `live_status` decides (D-096): only `live` is published,
+-and a result already stored (same `issued`; flare-nrt 2.0 updates every 2 min)
++and a result already stored (same `issued`; Centella 2.0 updates every 2 min)
+ is not stored again; `stale` turns the heartbeat `stale` with the producer's
+ `seconds_since_update` in its detail; `no_data`, `unknown` or a missing value
+ is `no_data`. A naive `timestamp` is read as UTC.
+diff --git a/docs/products/usach.flare.nrt.md b/docs/products/usach.flare.nrt.md
+index c42baf8..02c9954 100644
+--- a/docs/products/usach.flare.nrt.md
++++ b/docs/products/usach.flare.nrt.md
+@@ -1,9 +1,10 @@
+-# Model card: `usach.flare.nrt`
++# Model card: `usach.flare.nrt` — Centella
+ 
+ ## Summary
+ 
+-Near-real-time detector of M- and X-class solar flares in SDO/AIA synoptic
+-images, run every 2 minutes. It reports a probability per AIA slot, an alert
++**Centella** is HelioUSACH's near-real-time detector of M- and X-class solar
++flares in SDO/AIA synoptic images, run every 2 minutes; it produces the
++`usach.flare.nrt` product. It reports a probability per AIA slot, an alert
+ when it is ≥ 0.80, alerts merged into events, and an experimental location.
+ Maturity: **beta**. Version 2.0.0 changes how the input is built (rolling
+ baseline) and recalibrates the threshold on live data; the network weights
+@@ -22,7 +23,7 @@ Ensemble of 5 ResNet-18 (8 input channels, one logit), probability = mean
+ of sigmoids. Input = the 4 current channels + current − mean of the frames
+ at t−8, t−10, t−12 min ("rolling baseline", L = 8 min). Preprocessing:
+ bilinear 1024→512, asinh normalisation with global v_high per channel.
+-Frames failing QC (`flare_nrt/qc.py`) are never used, as current or
++Frames failing QC (`centella/qc.py`) are never used, as current or
+ baseline. Alerts ≤ 10 min apart are one event.
+ 
+ ## Training data
+@@ -51,7 +52,7 @@ chosen on this month, so these numbers are optimistic:
+ | 10 | 0.80 | 76 % (41/54) | 100 % | 59 % | 16 | −2 min |
+ 
+ The operational loop itself (v2.0.0, replay of the same month through
+-`flare_nrt.loop`, `python -m flare_nrt.validate`) reproduces the L = 8,
++`centella.loop`, `python -m centella.validate`) reproduces the L = 8,
+ 0.80 row exactly: 39/54, 22/22 ≥ M2, 3 false alarms, 51 alert runs (42 on
+ M/X, 6 on C).
+ 
+@@ -64,7 +65,7 @@ start:** the median alert comes **9 min after** the GOES start and 1 min
+ before the GOES peak. The model does **not** give earlier warning than
+ GOES XRS. Its value is an independent, imaging-based confirmation with a
+ location on the disk. Report the live numbers here weekly
+-(`python -m flare_nrt.validate`).
++(`python -m centella.validate`).
+ 
+ ## Known limitations
+ 
+@@ -88,6 +89,6 @@ location on the disk. Report the live numbers here weekly
+ 
+ ## Maintainers / links
+ 
+-Producer repository `HelioUSACH/flare-nrt` (its `INTEGRATION.md`,
++Producer repository `HelioUSACH/centella` (its `INTEGRATION.md`,
+ `docs/archive-format.md`); weights as a release asset with SHA-256.
+-Consumer side: `modules/flare/` (D-096, D-098).
++Consumer side: `modules/flare/` (D-096, D-098, D-099).
+diff --git a/modules/flare/adapters.py b/modules/flare/adapters.py
+index 3e1dbad..acfe3a2 100644
+--- a/modules/flare/adapters.py
++++ b/modules/flare/adapters.py
+@@ -1,5 +1,6 @@
+-"""Parses flare-nrt's `/api/status` response (shape read directly from
+-`HelioUSACH/flare-nrt`'s `nrt_server_v3.py::api_status`, 2026-10 — re-sync
++"""Parses the `/api/status` response of Centella, the flare model (repo
++`HelioUSACH/centella`, formerly `flare-nrt`; shape first read from its v1
++`nrt_server_v3.py::api_status`, 2026-10, and from `INTEGRATION.md` in 2.0 — re-sync
+ this adapter and its fixture if that endpoint's shape changes, same as any
+ other external adapter in this repo).
+ 
+@@ -17,7 +18,7 @@ The fields this module reads (D-096):
+   updates every ~3 min, the collector polls every minute).
+ - `seconds_since_update`: reported in the heartbeat detail when stale.
+ - `probability`, `flare_detected`, `location`, `ensemble_std`: the result.
+-- `observation_time` (flare-nrt ≥ 2.0): the AIA slot the result is about.
++- `observation_time` (Centella ≥ 2.0): the AIA slot the result is about.
+   When present it is the event's `valid_from`, so the product is plotted in
+   observation time; `issued` stays `timestamp` (the de-duplication key).
+   `alert`, `event_id`, `model_version` and `data_latency_s` are carried
+@@ -26,7 +27,7 @@ The fields this module reads (D-096):
+ Deliberately **not** surfaced in the public event payload: `severity`
+ (01-AUDIT.md §3.6 — self-reports accuracy 0.39, "exploratory_low"; showing
+ it as if it were a usable signal would be dishonest, D-036/D-044 "honest
+-science"). It stays available to the flare-nrt service's own expert
++science"). It stays available to the Centella service's own expert
+ dashboard, just not republished here."""
+ 
+ from __future__ import annotations
+@@ -74,7 +75,7 @@ def parse_status(raw: dict) -> dict | None:
+             quality[key] = raw[key]
+     provenance = None
+     if raw.get("model_version"):
+-        provenance = {"producer": f"flare-nrt@{raw['model_version']}",
++        provenance = {"producer": f"centella@{raw['model_version']}",
+                       "inputs": [f"aia.synoptic {raw['observation_time']}"] if raw.get("observation_time") else []}
+     return {"issued": issued, "valid_from": observed, "payload": payload, "quality": quality,
+             "provenance": provenance}
+diff --git a/modules/flare/client.py b/modules/flare/client.py
+index be6426c..abfa2fd 100644
+--- a/modules/flare/client.py
++++ b/modules/flare/client.py
+@@ -1,4 +1,4 @@
+-"""Client for the flare-nrt producer's own status endpoint (not exposed
++"""Client for the Centella producer's own status endpoint (not exposed
+ publicly — docs/ARCHITECTURE.md §6: 127.0.0.1:5050, nginx never proxies it).
+ Configurable because it isn't running in dev/CI."""
+ 
+diff --git a/modules/flare/collectors.py b/modules/flare/collectors.py
+index 47fba16..188a31c 100644
+--- a/modules/flare/collectors.py
++++ b/modules/flare/collectors.py
+@@ -17,7 +17,7 @@ def collect_nrt() -> None:
+         # The producer not running is expected before it's deployed (D-036:
+         # the portal's flare card shows "en preparación" and launch is never
+         # blocked on it) — "error" status, not an unhandled crash.
+-        swxkit.heartbeat(PRODUCT_ID, "error", detail="flare-nrt status endpoint unreachable")
++        swxkit.heartbeat(PRODUCT_ID, "error", detail="Centella status endpoint unreachable")
+         return
+ 
+     # D-096: a dead model must not look healthy. Only a live producer's
+@@ -25,18 +25,18 @@ def collect_nrt() -> None:
+     status = adapters.live_status(raw)
+     if status == "stale":
+         swxkit.heartbeat(PRODUCT_ID, "stale",
+-                         detail=f"flare-nrt is stale: {raw.get('seconds_since_update')} s since its last update")
++                         detail=f"Centella is stale: {raw.get('seconds_since_update')} s since its last update")
+         return
+     if status == "error":
+-        swxkit.heartbeat(PRODUCT_ID, "error", detail="flare-nrt reports live_status error")
++        swxkit.heartbeat(PRODUCT_ID, "error", detail="Centella reports live_status error")
+         return
+     if status != "live":
+-        swxkit.heartbeat(PRODUCT_ID, "no_data", detail=f"flare-nrt live_status {status}")
++        swxkit.heartbeat(PRODUCT_ID, "no_data", detail=f"Centella live_status {status}")
+         return
+ 
+     parsed = adapters.parse_status(raw)
+     if parsed is None:
+-        swxkit.heartbeat(PRODUCT_ID, "no_data", detail="flare-nrt has no result yet")
++        swxkit.heartbeat(PRODUCT_ID, "no_data", detail="Centella has no result yet")
+         return
+ 
+     # The producer updates every ~3 min and this runs every minute: the
+diff --git a/modules/flare/manifests/nrt.yaml b/modules/flare/manifests/nrt.yaml
+index 85a9574..0377bde 100644
+--- a/modules/flare/manifests/nrt.yaml
++++ b/modules/flare/manifests/nrt.yaml
+@@ -1,4 +1,4 @@
+-# Consumer-side manifest: the producer (flare-nrt) is a separate repository
++# Consumer-side manifest: the producer (Centella, the flare model) is a separate repository
+ # and FastAPI service (docs/models/INTEGRATION.md). This module only polls
+ # its already-running /api/status and republishes it as our own event — it
+ # never imports or depends on that repo's code.
+@@ -9,10 +9,10 @@ title: {es: "Detección de fulguraciones (NRT)", en: "Flare detection (NRT)"}
+ maturity: beta
+ cadence: 1m
+ stale_after: 10m
+-producer: {type: service, unit: "flare-loop.service", repo: "HelioUSACH/flare-nrt"}
++producer: {type: service, unit: "centella-loop.service", repo: "HelioUSACH/centella"}
+ source:
+   provider: "HelioUSACH (USACH)"
+-  inputs: ["SDO/AIA synoptic via JSOC (flare-nrt internal pipeline)"]
++  inputs: ["SDO/AIA synoptic via JSOC (Centella internal pipeline)"]
+   license: "CC-BY-4.0"
+ parameters:
+   - {name: probability, units: "1", range: [0, 1]}
+diff --git a/modules/flare/tests/fixtures/status_live_v2.json b/modules/flare/tests/fixtures/status_live_v2.json
+index b688fc4..03db39d 100644
+--- a/modules/flare/tests/fixtures/status_live_v2.json
++++ b/modules/flare/tests/fixtures/status_live_v2.json
+@@ -1,5 +1,6 @@
+ {
+   "status": "running",
++  "model": "Centella",
+   "model_version": "2.0.0",
+   "weights_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+   "timestamp": "2026-10-27T14:16:41Z",
+diff --git a/modules/flare/tests/test_adapters.py b/modules/flare/tests/test_adapters.py
+index 28e36b3..201870b 100644
+--- a/modules/flare/tests/test_adapters.py
++++ b/modules/flare/tests/test_adapters.py
+@@ -27,14 +27,14 @@ def test_parse_status_live():
+ 
+ 
+ def test_parse_status_v2_uses_observation_time():
+-    # Synthetic payload in flare-nrt 2.0's /api/status shape.
++    # Synthetic payload in Centella 2.0's /api/status shape.
+     parsed = adapters.parse_status(_load("status_live_v2.json"))
+     assert parsed["issued"] == dt.datetime(2026, 10, 27, 14, 16, 41, tzinfo=dt.UTC)
+     assert parsed["valid_from"] == dt.datetime(2026, 10, 27, 14, 2, tzinfo=dt.UTC)
+     assert parsed["payload"]["alert"] is True and parsed["payload"]["event_id"] == 7
+     assert parsed["quality"]["model_version"] == "2.0.0"
+     assert parsed["quality"]["data_latency_s"] == 881
+-    assert parsed["provenance"]["producer"] == "flare-nrt@2.0.0"
++    assert parsed["provenance"]["producer"] == "centella@2.0.0"
+ 
+ 
+ def test_parse_status_v1_shape_unchanged():
+-- 
+2.43.0
+

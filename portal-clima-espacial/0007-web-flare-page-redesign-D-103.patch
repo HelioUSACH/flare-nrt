@@ -1,0 +1,2167 @@
+From 15a3676fbd1c72c1fed5ae5ff8d44881065ee5aa Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 09:20:20 -0300
+Subject: [PATCH] web: flare page redesign from the reviewed mockup (D-103)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Dark band with source and cursor time; state card + 131 Å disk + 4
+channels; two-lane timeline with transport and, in archive, a whole-period
+strip; period summary; one list of flares and alerts. Location as
+Stonyhurst lat/lon plus arcsec.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019TiLZJK6V4V5hFsgBRSyAK
+---
+ docs/DECISIONS.md                           |   1 +
+ locale/en/LC_MESSAGES/django.mo             | Bin 40365 -> 45155 bytes
+ locale/en/LC_MESSAGES/django.po             | 252 ++++++++
+ web/flare_page.py                           |  45 +-
+ web/static/web/css/base.css                 | 249 ++++----
+ web/static/web/js/flare-page.js             | 641 +++++++++++++-------
+ web/templates/web/product_detail_flare.html | 292 +++++----
+ web/tests/test_flare_page.py                |  19 +-
+ web/views.py                                |  50 +-
+ 9 files changed, 1036 insertions(+), 513 deletions(-)
+
+diff --git a/docs/DECISIONS.md b/docs/DECISIONS.md
+index 78c0b92..7f3eb47 100644
+--- a/docs/DECISIONS.md
++++ b/docs/DECISIONS.md
+@@ -108,3 +108,4 @@ record for this repository; propose a change as a PR that adds a new entry
+ | D-100 | 2026-10-27 | **The flare detector has its own page** (`web/flare_page.py`, `web/templates/web/product_detail_flare.html`), replacing the generic event page for `usach.flare.nrt`: current state (quiet / flare in progress / delayed / coming soon, from the latest event and the heartbeat), the 4 AIA channels as image or as the model's difference, the last 24 h of probability against GOES 0.1–0.8 nm flux, and the last 7 days of events with a GOES class taken from the stored X-ray peak in [start − 10 min, end + 10 min]. Everything is read from what the portal already stores, except the channel images: `productos/usach.flare.nrt/aia/<wave>.png` proxies Centella's `127.0.0.1` `/api/image/<wave>.png` (cached 60 s, 404 when the model is down; Centella stays unexposed, ARCHITECTURE §6). Charts are server-rendered SVG; the page reloads every 2 min with a meta refresh (no JS). | The mockup was approved; the generic page showed only the last event's issue time. | Nicolás / Claude |
+ | D-101 | 2026-11-02 | **The flare page gets an "Explorar" companion** (`productos/usach.flare.nrt/explorar/`, `web/templates/web/product_detail_flare_explore.html`, `web/static/web/js/flare-explore.js`). It shows the same hero, 4 AIA channels (image / difference), Grad-CAM, and Centella-events vs GOES-flares tables, all driven by a time cursor over any period: a timeline in vendored ECharts with zoom, click to jump, playback and keyboard steps, and the instant kept in the URL hash. Its data come through whitelisted portal proxies to a Centella API (≥ 2.2): `explorar/datos/{range,series,events,flares}.json` (params `start`, `end`, `days` only), `explorar/datos/frame/<slot>.json`, `aia/<wave>.png?slot=` and `explorar/gradcam/<slot>.png`. A slot must match `YYYY-MM-DDTHH:MM[:SS]Z`. JSON is cached 30 s, slot images a day, and a source that is down gives 502/404. The source is `FLARE_ARCHIVE_URL` (`modules/flare/client.py`), which defaults to the live `FLARE_NRT_URL`; pointing it at a Centella API that serves a replayed period (e.g. a month on the processing server, through an SSH tunnel) makes the page an evaluation tool without touching the live page. The live page stays server-rendered with its meta refresh (D-100); the cursor-driven view needs JS, so it is a separate page linked from it. The disk marker now uses the synoptic field of view (1024 px × 2.4″) instead of an approximate 86 % disk. The producer repository is `HelioUSACH/flare-nrt` (maintainers' brief, 2026-10-28; supersedes the rename in D-099), with Centella as the model's name. | Owner asked to browse the month's replay in the page's design, frame by frame. | Nicolás / Claude |
+ | D-102 | 2026-11-02 | **One flare page, with a time cursor** (supersedes D-101's separate page; `explorar/` now redirects to the page with `#fuente=archivo`). The first paint is still server-rendered from what the portal stores (D-100: state, latest images, 24 h SVG chart, recent events). `web/static/web/js/flare-page.js` then turns it into the time-cursor view. It follows "now" (polls every 60 s; the cursor stays on the newest frame until the reader moves it, and "Ahora" returns to it), goes back through any period, and switches source between the live service (`FLARE_NRT_URL`) and a replayed archive (`FLARE_ARCHIVE_URL`, offered only when it differs). Every proxy takes `fuente=vivo|archivo` and caches per source: `datos/{range,series,events,flares}.json`, `datos/frame/<slot>.json`, `aia/<wave>.png?slot=`, `gradcam/<slot>.png`. The GOES 0.1–0.8 nm flux comes from the portal's own `noaa.goes.xray` rows through `datos/xray.json` (window ≤ 14 days, ≤ ~2000 points), drawn on a log axis A–X as before. GOES flare bands come from Centella ≥ 2.2.1 `/api/flares`, which adds SWPC's 7-day list for recent days. Without JS the page keeps its 2-min reload (in `<noscript>`). | Owner asked for a single page: open on "now", go back in time, and browse the month's replay without a separate page. | Nicolás / Claude |
++| D-103 | 2026-11-04 | **Flare page redesign, from a reviewed mockup** (`product_detail_flare.html`, `flare-page.js`, the flare block of `base.css`; supersedes D-100/D-102's layout, not their data flow). Top: a dark `--space` band with the title "Flares solares", the source switch (En vivo / Archivo) and the cursor's time in large mono; in live it reads "Actualizado hace … · imagen de hace … min", in archive "Archivo de evaluación · first → last". The source/period form bar is gone. Hero, in three columns that stack on a phone: the state card, the 131 Å disk (131 Å / Diferencia / Grad-CAM) and the 4 channels in 2 × 2. The state card has one colour per Centella state (quiet / onset / active / decay from the series' `state`, plus "sin resultado" and, live only, "sin datos recientes"), a 4-step strip (Calma → Inicio → En curso → Decae), the probability with a last-hour sparkline, and three facts: AIA image, GOES class (the flare's, else the X-ray flux at that instant) and location. Location reads as Stonyhurst lat/lon plus arcsec (`flare_page.heliographic`, duplicated in JS: low-precision ephemeris for the solar radius and B0, ~1°; off-disk or on-limb regions keep arcsec only). The box on the disk carries a label ("M3.1 · N17 W29"). Timeline: two ECharts lanes sharing the time axis (probability with the 0.80 line; GOES on a log axis with M/X labels at their peaks), event bands across both, the cursor and its time; window 6 h / 24 h / 3 d / 7 d, plus "Todo" in archive. Archive also gets a strip of the whole period (max probability per bucket, alerts in red, the window framed; click moves the window). The transport sits under the chart (event jumps, ±1 image, play at 1×/2×/4×, position "imagen i de n", Ahora / Volver a en vivo). New: a summary of the *period* (last 24 h live, the whole archive up to 40 days otherwise): Centella events, M/X detected (and ≥ M2), max probability, false alarms, coverage, with Centella's validation rules (hit: an alert in [start − 10, end + 5] min; false alarm: no C-or-larger flare in [start − 10, end + 30] min). The two tables become one "Flares y alertas" list: each M/X flare with its alert (Detectada / No detectada) and each other alert (Alerta en flare C / Falsa alarma / En curso). Removed after review: subtitle, latency fact, captions under the disk and channels, channel descriptions (now a tooltip) and the "cómo leerlo" section. "flare" everywhere instead of "fulguración" on this page. No new endpoint: the period reuses `series`/`events`/`flares`, and windows inside the period are served from it. |
+diff --git a/locale/en/LC_MESSAGES/django.mo b/locale/en/LC_MESSAGES/django.mo
+index 8c8f2a7b190a91bb63c5ef92fc38f75a2c169b54..03d2030875b13528035ec85aec85d96e66ff34f3 100644
+GIT binary patch
+delta 11547
+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
+
+delta 7256
+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
+
+diff --git a/locale/en/LC_MESSAGES/django.po b/locale/en/LC_MESSAGES/django.po
+index fbf2b4c..9f54ec6 100644
+--- a/locale/en/LC_MESSAGES/django.po
++++ b/locale/en/LC_MESSAGES/django.po
+@@ -1253,3 +1253,255 @@ msgstr "Centella could not be read. Is its API running?"
+ 
+ msgid "El recuadro marca la región de mayor aumento en 131 Å (ubicación de Centella). Norte arriba, oeste a la derecha."
+ msgstr "The box marks the region of largest increase at 131 Å (Centella's location). North up, west to the right."
++
++# flare page redesign (D-103)
++msgid "Flares solares"
++msgstr "Solar flares"
++
++msgid "Calma"
++msgstr "Quiet"
++
++msgid "Sin datos recientes"
++msgstr "No recent data"
++
++msgctxt "flare state"
++msgid "Inicio"
++msgstr "Onset"
++
++msgid "En curso"
++msgstr "Ongoing"
++
++msgid "Decae"
++msgstr "Decay"
++
++msgid "Probabilidad de flare M/X"
++msgstr "M/X flare probability"
++
++msgid "Última hora"
++msgstr "Last hour"
++
++msgid "Imagen AIA"
++msgstr "AIA image"
++
++msgid "GOES rayos X"
++msgstr "GOES X-rays"
++
++msgid "Ver la lista"
++msgstr "See the list"
++
++msgid "Diferencia"
++msgstr "Difference"
++
++msgid "Norte arriba, oeste a la derecha. El recuadro marca la región que más subió en 131 Å."
++msgstr "North up, west right. The box marks the region that brightened most in 131 Å."
++
++msgid "4 canales"
++msgstr "4 channels"
++
++msgid "Línea de tiempo"
++msgstr "Timeline"
++
++msgid "Probabilidad Centella"
++msgstr "Centella probability"
++
++msgid "Todo"
++msgstr "All"
++
++msgid "Todo el período · clic para llevar la ventana ahí"
++msgstr "Whole period · click to move the window there"
++
++msgid "Teclado: ← → una imagen, Shift + ← → una hora, espacio reproduce, J / K salta entre eventos. Clic en el gráfico mueve el cursor."
++msgstr "Keys: ← → one image, Shift + ← → one hour, space plays, J / K jump between events. Click the chart to move the cursor."
++
++msgid "Flares y alertas"
++msgstr "Flares and alerts"
++
++msgid "Hora (UT)"
++msgstr "Time (UT)"
++
++msgid "Alerta Centella"
++msgstr "Centella alert"
++
++msgid "Resultado"
++msgstr "Result"
++
++msgid "Detectada"
++msgstr "Detected"
++
++msgid "Alerta en flare C"
++msgstr "Alert on a C flare"
++
++msgid "Sin flare GOES"
++msgstr "No GOES flare"
++
++msgid "Fuente de datos"
++msgstr "Data source"
++
++msgid "Ciclo de un evento"
++msgstr "Life of an event"
++
++msgid "Probabilidad en la última hora"
++msgstr "Probability over the last hour"
++
++msgid "Vista del disco"
++msgstr "Disk view"
++
++msgid "Imagen o diferencia"
++msgstr "Image or difference"
++
++msgid "Probabilidad máxima en todo el período"
++msgstr "Maximum probability over the whole period"
++
++msgid "Evento anterior"
++msgstr "Previous event"
++
++msgid "Evento anterior (J)"
++msgstr "Previous event (J)"
++
++msgid "Imagen anterior"
++msgstr "Previous image"
++
++msgid "Imagen anterior (←)"
++msgstr "Previous image (←)"
++
++msgid "Reproducir"
++msgstr "Play"
++
++msgid "Imagen siguiente"
++msgstr "Next image"
++
++msgid "Imagen siguiente (→)"
++msgstr "Next image (→)"
++
++msgid "Evento siguiente"
++msgstr "Next event"
++
++msgid "Evento siguiente (K)"
++msgstr "Next event (K)"
++
++#, python-format
++msgid "imagen de hace %(m)s min"
++msgstr "image from %(m)s min ago"
++
++#, python-format
++msgid "evento desde %(t)s UT"
++msgstr "event since %(t)s UT"
++
++#, python-format
++msgid "alerta %(t)s"
++msgstr "alert %(t)s"
++
++msgid "evento desde"
++msgstr "event since"
++
++msgid "Inicio de flare"
++msgstr "Flare onset"
++
++msgid "Decaimiento"
++msgstr "Decay"
++
++msgid "Alerta desde las"
++msgstr "Alert since"
++
++msgid "Bajó del umbral; el evento se cierra si no vuelve a subir en 10 minutos."
++msgstr "Below the threshold; the event closes unless it rises again within 10 minutes."
++
++msgid "La imagen más nueva es de hace {m} min; se muestra el último resultado."
++msgstr "The newest image is {m} min old; showing the last result."
++
++msgid "Comparada con {n} de {of} imágenes de 8–12 min antes."
++msgstr "Compared with {n} of {of} images from 8–12 min earlier."
++
++msgid "flujo en ese instante"
++msgstr "flux at that instant"
++
++msgid "flare"
++msgstr "flare"
++
++msgid "limbo O"
++msgstr "W limb"
++
++msgid "limbo E"
++msgstr "E limb"
++
++msgid "Diferencia 131 Å"
++msgstr "131 Å difference"
++
++msgid "131 Å + Grad-CAM"
++msgstr "131 Å + Grad-CAM"
++
++msgid "Actualizado hace {s} s"
++msgstr "Updated {s} s ago"
++
++msgid "imagen de hace {m} min"
++msgstr "image from {m} min ago"
++
++msgid "Archivo de evaluación"
++msgstr "Evaluation archive"
++
++msgid "Volver a en vivo"
++msgstr "Back to live"
++
++msgid "Pausar"
++msgstr "Pause"
++
++msgid "imagen {i} de {n}"
++msgstr "image {i} of {n}"
++
++msgid "última imagen"
++msgstr "latest image"
++
++msgid "Probabilidad · 0 a 1"
++msgstr "Probability · 0 to 1"
++
++msgid "Comparado con la lista de flares GOES (SWPC)"
++msgstr "Compared with the GOES flare list (SWPC)"
++
++msgid "Eventos Centella"
++msgstr "Centella events"
++
++msgid "1 abierto ahora"
++msgstr "1 open now"
++
++msgid "en {d} días"
++msgstr "in {d} days"
++
++msgid "Flares M/X detectadas"
++msgstr "M/X flares detected"
++
++msgid "{h} de {n}"
++msgstr "{h} of {n}"
++
++msgid "{pct} % · desde M2: {h} de {n}"
++msgstr "{pct} % · M2 and up: {h} of {n}"
++
++msgid "ninguna M/X en el período"
++msgstr "no M/X in the period"
++
++msgid "Probabilidad máxima"
++msgstr "Maximum probability"
++
++msgid "Falsas alarmas"
++msgstr "False alarms"
++
++msgid "alerta sin flare C o mayor"
++msgstr "alert with no C-or-larger flare"
++
++msgid "≈ 1 cada {d} días"
++msgstr "≈ 1 every {d} days"
++
++msgid "Cobertura"
++msgstr "Coverage"
++
++msgid "{ok} de {n} imágenes con resultado"
++msgstr "{ok} of {n} images with a result"
++
++msgid "No detectada"
++msgstr "Not detected"
++
++msgid "Falsa alarma"
++msgstr "False alarm"
++
++msgid "Sin flares M/X ni alertas en este período."
++msgstr "No M/X flares or alerts in this period."
++
+diff --git a/web/flare_page.py b/web/flare_page.py
+index b03e488..65d0cea 100644
+--- a/web/flare_page.py
++++ b/web/flare_page.py
+@@ -66,14 +66,37 @@ def _xray_y(flux: float) -> float:
+     return H - (v - lo) / (hi - lo) * H
+ 
+ 
+-def _location_text(loc: dict | None, lang: str) -> str:
++def heliographic(x: float, y: float, when: dt.datetime | None = None) -> str:
++    """Helioprojective arcsec (north up, as in AIA level 1.5) → Stonyhurst
++    "N14 W31", with the Sun's apparent radius and B0 for the date (low-
++    precision ephemeris, good to ~1°). "" off the disk. flare-page.js has
++    the same function (``heliographic``)."""
++    when = when or timezone.now()
++    d = (when - dt.datetime(2000, 1, 1, 12, tzinfo=dt.UTC)).total_seconds() / 86400
++    g = math.radians(357.529 + 0.98560028 * d)                       # mean anomaly
++    r_au = 1.00014 - 0.01671 * math.cos(g) - 0.00014 * math.cos(2 * g)
++    radius = 959.63 / r_au
++    lam = math.radians(280.459 + 0.98564736 * d + 1.915 * math.sin(g))
++    node = math.radians(75.76 + 0.01397 * (when.year - 1850))
++    b0 = math.asin(math.sin(lam - node) * math.sin(math.radians(7.25)))
++    u, v = x / radius, y / radius
++    if u * u + v * v >= 1:
++        return ""
++    w = math.sqrt(1 - u * u - v * v)
++    lat = math.degrees(math.asin(v * math.cos(b0) + w * math.sin(b0)))
++    lon = math.degrees(math.atan2(u, w * math.cos(b0) - v * math.sin(b0)))
++    return f"{'N' if lat >= 0 else 'S'}{abs(lat):02.0f} {'W' if lon >= 0 else 'E'}{abs(lon):02.0f}"
++
++
++def _location_text(loc: dict | None, lang: str, when: dt.datetime | None = None) -> str:
+     if not loc or not loc.get("centroid_arcsec"):
+         return ""
+     x, y = loc["centroid_arcsec"]
+-    limb = ""
+     if loc.get("on_limb"):
+         limb = (" · limbo O" if x > 0 else " · limbo E") if lang == "es" else (" · W limb" if x > 0 else " · E limb")
+-    return f"{x:+.0f}″, {y:+.0f}″{limb}"
++        return f"{x:+.0f}″, {y:+.0f}″{limb}"
++    hg = heliographic(x, y, when)
++    return f"{hg + ' · ' if hg else ''}{x:+.0f}″, {y:+.0f}″"
+ 
+ 
+ AIA_HALF_FOV = 1024 * 2.4 / 2          # synoptic images: 1024 px × 2.4″, centred on the Sun
+@@ -132,7 +155,7 @@ def recent_events(product, lang: str, now: dt.datetime) -> list[dict]:
+         out.append({
+             "start": e["start"], "minutes": int((e["end"] - e["start"]).total_seconds() // 60) + 2,
+             "p_max": e["p_max"], "goes": cls, "goes_level": cls[:1],
+-            "location": _location_text(e["location"], lang), "raw_location": e["location"],
++            "location": _location_text(e["location"], lang, e["start"]), "raw_location": e["location"],
+         })
+     return out
+ 
+@@ -161,10 +184,15 @@ def flare_context(product, heartbeat_status: str, lang: str, view: str) -> dict:
+     xray = (TimeSeriesPoint.objects.filter(product_id="noaa.goes.xray", payload__energy=XRAY_ENERGY,
+                                            time_tag__gte=t0)
+             .order_by("time_tag").values_list("time_tag", "payload__flux"))
+-    xray_pts = [(t, _xray_y(float(f))) for t, f in xray if isinstance(f, (int, float)) and f > 0]
++    xray_raw = [(t, float(f)) for t, f in xray if isinstance(f, (int, float)) and f > 0]
++    xray_pts = [(t, _xray_y(f)) for t, f in xray_raw]
+ 
+     events = recent_events(product, lang, now)
+     open_event = events[0] if events and state == "flare" else None
++    goes_now = goes_class(xray_raw[-1][1]) if xray_raw and xray_raw[-1][0] >= now - dt.timedelta(minutes=10) else ""
++    loc = p.get("location") or (open_event or {}).get("raw_location")
++    observed = latest.valid_from if latest else None
++    hg = heliographic(*loc["centroid_arcsec"], observed) if loc and loc.get("centroid_arcsec") else ""
+     ticks = []
+     for h in range(0, 25, 6):
+         t = t0 + dt.timedelta(hours=h)
+@@ -185,8 +213,11 @@ def flare_context(product, heartbeat_status: str, lang: str, view: str) -> dict:
+             "threshold_pct": threshold * 100,
+             "latency_min": round(q["data_latency_s"] / 60) if q.get("data_latency_s") is not None else None,
+             "model_version": q.get("model_version"),
+-            "location": _location_text(p.get("location"), lang),
+-            "marker": flare_box(p.get("location") or (open_event or {}).get("raw_location")),
++            "location": _location_text(p.get("location"), lang, observed),
++            "marker": flare_box(loc),
++            "box_label": hg or "flare",
++            "goes_now": goes_now,
++            "state_key": {"flare": "active", "quiet": "quiet", "stale": "stale"}.get(state, "none"),
+             "open_event": open_event,
+             "last_event": events[0] if events else None,
+             "view": "diff" if view in {"diff", "diferencia"} else "img",
+diff --git a/web/static/web/css/base.css b/web/static/web/css/base.css
+index 4a06e0c..16aefb3 100644
+--- a/web/static/web/css/base.css
++++ b/web/static/web/css/base.css
+@@ -549,120 +549,153 @@ pre.code { background: var(--band); border: 1px solid var(--line); border-radius
+ .csv-dialog .csv-error { color: var(--severity-strong); font-size: .9rem; }
+ .csv-dialog .csv-actions { display: flex; justify-content: flex-end; gap: 8px; }
+ 
+-/* ---------- flare detector page (usach.flare.nrt, model Centella, D-099) ---------- */
+-.flare-page h1 { margin-top: 8px; }
+-.flare-hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 24px; margin-top: 28px; }
+-.flare-now { background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px; display: flex; flex-direction: column; gap: 18px; }
+-.flare-now h2 { display: flex; align-items: center; gap: 14px; font-size: 48px; margin: 0; }
+-.flare-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--status-nodata); flex: none; }
+-.flare-now--quiet .flare-dot { background: var(--severity-ok); }
+-.flare-now--flare { border: 2px solid var(--severity-strong); }
+-.flare-now--flare .eyebrow { color: var(--severity-strong); }
+-.flare-now--flare .flare-dot { background: var(--severity-strong); }
+-.flare-now--stale .flare-dot { background: var(--status-stale); }
+-.flare-meter { display: grid; gap: 8px; }
+-.flare-meter__head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--font-ui); font-size: 13px; color: var(--ink-soft); }
+-.flare-meter__head b { font-family: var(--font-mono); font-size: 22px; font-weight: 500; color: var(--ink); }
+-.flare-meter__bar { position: relative; height: 12px; border-radius: 999px; background: var(--band); }
+-.flare-meter__fill { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--accent); }
+-.flare-now--flare .flare-meter__fill { background: var(--severity-strong); }
+-.flare-meter__thr { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--severity-strong); }
+-.flare-meter__legend { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); }
+-.flare-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+-.flare-facts dt { font-family: var(--font-ui); font-size: 12px; color: var(--ink-faint); }
+-.flare-facts dd { margin: 2px 0 0; font-family: var(--font-mono); font-size: 14px; }
+-.flare-note { margin: 0; font-size: 14px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 16px; }
+-.flare-disk { margin: 0; background: var(--space); border-radius: var(--radius); padding: 20px; display: grid; gap: 12px; color: var(--space-ink); align-content: start; }
+-.flare-disk .eyebrow { color: var(--sun); }
+-.flare-disk__img { position: relative; width: 100%; max-width: 380px; margin: 0 auto; aspect-ratio: 1 / 1; background: var(--space-2); border-radius: 8px; overflow: hidden; }
+-.flare-disk__img img, .flare-ch img { width: 100%; height: auto; display: block; }
++/* ---------- flare page (usach.flare.nrt, model Centella, D-099/D-102/D-103) ----------
++ * Layout from the D-103 mockup: a dark band (source + time of the cursor),
++ * state card + 131 Å disk + 4 channels, timeline with transport, period
++ * summary, one list of flares and alerts. The dark surfaces use --space in
++ * both themes, like the home hero. */
++.fx [hidden] { display: none !important; }
++.fx-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
++.fx-band { background: var(--space); color: var(--space-ink); padding-bottom: 112px; }
++.fx-crumb { color: var(--space-soft); }
++.fx-crumb a { color: var(--space-soft); }
++.fx-band__in { display: flex; flex-wrap: wrap; gap: 20px 48px; align-items: flex-end; justify-content: space-between; padding-top: 10px; }
++.fx-title { font-family: var(--font-display); font-weight: 400; font-size: clamp(48px, 6vw, 76px); line-height: .92; margin: 0; color: var(--space-ink); }
++.fx-band__side { display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
++.fx-when { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: baseline; }
++.fx-when__t { font-family: var(--font-mono); font-size: clamp(20px, 2.3vw, 30px); font-weight: 500; }
++.fx-when__src { font-family: var(--font-ui); font-size: 13px; color: var(--space-soft); display: inline-flex; align-items: center; gap: 6px; }
++.fx-when__src .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
++.fx .seg button { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; }
++.fx-seg--dark { border-color: rgba(255, 255, 255, .18); }
++.fx-seg--dark button, .fx-seg--dark .seg-link { color: var(--space-soft); }
++.fx-seg--dark .seg-link { padding: 6px 12px; border-radius: 999px; text-decoration: none; }
++.fx-seg--dark button.on, .fx-seg--dark .seg-link.on { background: var(--sun); color: var(--space); }
++.fx-seg--big button { min-height: 44px; padding: 0 18px; font-size: 14px; font-weight: 500; }
++.fx-live-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--status-ok); animation: fx-pulse 2s infinite; }
++@keyframes fx-pulse { 0% { box-shadow: 0 0 0 0 rgba(12, 163, 12, .55); } 70% { box-shadow: 0 0 0 8px rgba(12, 163, 12, 0); } 100% { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0); } }
++@media (prefers-reduced-motion: reduce) { .fx-live-dot { animation: none; } }
++
++.fx-hero { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; margin-top: -88px; }
++.fx-card { background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); }
++.fx-panel { margin: 0; background: var(--space); color: var(--space-ink); border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
++.fx-panel__head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
++.fx-panel .eyebrow { color: var(--sun); margin: 0; }
++
++.fx-state { flex: 1 1 340px; min-width: 0; padding: 26px 26px 22px; border-top: 4px solid var(--stc); display: flex; flex-direction: column; gap: 18px; --stc: var(--status-nodata); --stc-soft: var(--band); }
++.fx-st--quiet { --stc: var(--severity-ok); --stc-soft: var(--severity-ok-soft); }
++.fx-st--onset { --stc: var(--severity-minor); --stc-soft: var(--severity-minor-soft); }
++.fx-st--active { --stc: var(--severity-strong); --stc-soft: var(--severity-strong-soft); }
++.fx-st--decay { --stc: var(--severity-moderate); --stc-soft: var(--severity-moderate-soft); }
++.fx-st--stale, .fx-st--none { --stc: var(--status-nodata); --stc-soft: var(--band); }
++.fx-state__eyebrow { color: var(--stc); }
++.fx-state__h { display: flex; align-items: center; gap: 14px; margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(38px, 3.6vw, 52px); line-height: .92; color: var(--stc); }
++.fx-state__dot { width: 16px; height: 16px; border-radius: 50%; background: var(--stc); flex: none; }
++.fx-steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 6px; }
++.fx-steps li { flex: 1 1 0; min-width: 0; text-align: center; font-family: var(--font-ui); font-size: 11.5px; font-weight: 500; padding: 6px 4px; border-radius: 8px; color: var(--ink-faint); border: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++.fx-steps li.on { background: var(--stc); border-color: var(--stc); color: var(--raised); }
++.fx-meter__head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--font-ui); font-size: 13px; color: var(--ink-soft); }
++.fx-meter__head b { font-family: var(--font-mono); font-size: 34px; font-weight: 600; color: var(--ink); }
++.fx-meter__bar { position: relative; height: 10px; border-radius: 5px; background: var(--band); margin-top: 8px; }
++.fx-meter__fill { position: absolute; inset: 0 auto 0 0; border-radius: 5px; background: var(--stc); }
++.fx-meter__thr { position: absolute; top: -5px; bottom: -5px; width: 2px; background: var(--ink); }
++.fx-meter__legend { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); margin-top: 6px; }
++.fx-spark { width: 100%; height: 40px; display: block; margin-top: 8px; }
++.fx-spark__thr { stroke: var(--severity-strong); stroke-dasharray: 3 3; stroke-width: 1; vector-effect: non-scaling-stroke; opacity: .6; }
++.fx-spark__area { fill: var(--stc-soft); }
++.fx-spark__line { fill: none; stroke: var(--stc); stroke-width: 2; vector-effect: non-scaling-stroke; }
++.fx-spark__cap { font-family: var(--font-ui); font-size: 11.5px; color: var(--ink-faint); }
++.fx-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; margin: 0; padding-top: 16px; border-top: 1px solid var(--line); }
++.fx-facts__wide { grid-column: 1 / -1; }
++.fx-facts dt { font-family: var(--font-ui); font-size: 12px; color: var(--ink-faint); }
++.fx-facts dd { margin: 2px 0 0; font-family: var(--font-mono); font-size: 14px; }
++.fx-note { margin: 0; font-size: 13.5px; color: var(--ink-soft); }
++.fx-cls { display: inline-block; font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; padding: 1px 7px; border-radius: 6px; background: var(--band); color: var(--ink-soft); }
++.fx-cls--M { background: var(--severity-moderate-soft); color: var(--severity-moderate); }
++.fx-cls--X { background: var(--severity-strong-soft); color: var(--severity-strong); }
++
++.fx-disk { flex: 1.55 1 440px; }
++.fx-disk__img { position: relative; width: 100%; max-width: 470px; margin: auto; aspect-ratio: 1 / 1; background: var(--space-2); border-radius: 8px; }
++.fx-disk-holder, .fx-ch-img { width: 100%; aspect-ratio: 1 / 1; }
++.fx-disk-holder img, .fx-ch-img img { width: 100%; height: auto; display: block; border-radius: 8px; background: var(--space-2); }
++.fx-chs { flex: 1 1 260px; background: var(--space-2); }
++.fx-chs__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: start; }
++.fx-ch { margin: 0; display: flex; flex-direction: column; gap: 6px; }
++.fx-ch figcaption { font-family: var(--font-mono); font-size: 12px; color: var(--space-ink); }
++.fx-ch-img { position: relative; background: #05080f; border-radius: 8px; }
++.fx-ch-pic { width: 100%; height: 100%; }
++.fx-none { height: 100%; display: grid; place-items: center; text-align: center; padding: 12px; font-size: 12px; color: var(--space-soft); }
+ .fx-box { position: absolute; box-sizing: border-box; border: 2px solid var(--sun); border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(0, 0, 0, .35); pointer-events: none; }
+-.fx-box::after { content: "flare"; position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; padding: 1px 6px; border-radius: 3px; background: var(--sun); color: var(--space); font-family: var(--font-ui); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
+-.fx-box--ch::after { font-size: 9.5px; padding: 0 4px; }
+-.flare-disk figcaption { font-size: 12.5px; color: var(--space-soft); }
+-.seg-link { font-family: var(--font-ui); font-size: 12.5px; color: var(--ink-soft); border-radius: 999px; padding: 6px 14px; text-decoration: none; }
+-.seg-link.on { background: var(--ink); color: var(--bg); }
+-.flare-channels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+-.flare-ch { margin: 0; background: var(--space); border-radius: var(--radius); padding: 14px; display: grid; gap: 10px; color: var(--space-ink); }
+-.flare-ch img { background: var(--space-2); border-radius: 8px; aspect-ratio: 1 / 1; }
+-.flare-ch__name { font-family: var(--font-display); font-size: 28px; line-height: 1; color: var(--sun); }
+-.flare-ch figcaption { display: grid; gap: 2px; font-size: 12.5px; color: var(--space-soft); }
+-.flare-ch figcaption b { font-family: var(--font-ui); font-weight: 500; font-size: 13px; color: var(--space-ink); }
+-.flare-help { font-size: 13px; color: var(--ink-faint); margin: 12px 0 0; }
+-.flare-chart { margin: 0; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); padding: 28px 44px 16px 52px; }
+-.flare-chart__plot { position: relative; height: 240px; }
++.fx-box::after { content: attr(data-label); position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; padding: 1px 6px; border-radius: 3px; background: var(--sun); color: var(--space); font-family: var(--font-ui); font-size: 11px; font-weight: 600; white-space: nowrap; }
++.fx-box--ch::after { display: none; }
++
++.fx-tl { margin-top: 16px; padding: 22px 24px 18px; }
++.fx-tl__head { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; justify-content: space-between; }
++.fx-tl__title { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; }
++.fx-tl h2, .fx-sum h2, .fx-list h2 { font-family: var(--font-ui); font-size: 18px; font-weight: 600; margin: 0; letter-spacing: 0; }
++.fx-legend { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: 12px; color: var(--ink-soft); }
++.fx-sw { display: inline-block; width: 16px; height: 3px; border-radius: 2px; }
++.fx-sw--p { background: var(--chart-s1); }
++.fx-sw--x { background: var(--chart-s2); }
++.fx-sw--ev { height: 10px; background: var(--severity-strong-soft); border: 1px solid var(--severity-strong); }
++.fx-chart { margin-top: 18px; }
++.fx-chart.is-echarts { height: 340px; cursor: crosshair; }
++.flare-chart__plot { position: relative; height: 240px; margin: 8px 30px 0 40px; }
+ .flare-chart__plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+ .flare-chart__grid line { stroke: var(--grid); stroke-width: 1; vector-effect: non-scaling-stroke; }
+-.flare-chart__prob { fill: none; stroke: var(--chart-s1); stroke-width: 1.75; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
++.flare-chart__prob { fill: none; stroke: var(--chart-s1); stroke-width: 1.75; vector-effect: non-scaling-stroke; }
+ .flare-chart__xray { fill: none; stroke: var(--chart-s2); stroke-width: 1.25; opacity: .85; vector-effect: non-scaling-stroke; }
+ .flare-chart__thr { stroke: var(--severity-strong); stroke-width: 1.5; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
+ .flare-chart__y { position: absolute; left: -40px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+ .flare-chart__cls { position: absolute; right: -28px; font-family: var(--font-mono); font-size: 11px; color: var(--chart-s2); }
+ .flare-chart__ev { position: absolute; top: -22px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 11px; color: var(--severity-moderate); white-space: nowrap; }
+-.flare-chart__x { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); margin-top: 8px; }
+-.flare-chart__legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 12.5px; color: var(--ink-soft); margin-top: 12px; }
+-.flare-chart__legend i { display: inline-block; width: 18px; margin-right: 8px; vertical-align: middle; border-top: 2px solid; }
+-.flare-chart__legend .k-prob { border-color: var(--chart-s1); }
+-.flare-chart__legend .k-xray { border-color: var(--chart-s2); }
+-.flare-chart__legend .k-thr { border-color: var(--severity-strong); border-top-style: dashed; }
+-.flare-table { overflow-x: auto; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); }
+-.flare-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
+-.flare-table th { font-family: var(--font-ui); font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+-.flare-table td { padding: 12px; border-bottom: 1px solid var(--grid); font-family: var(--font-mono); font-size: 13px; }
+-.flare-cls { font-family: var(--font-ui); font-size: 12px; font-weight: 600; border-radius: 6px; padding: 3px 8px; background: var(--band); }
+-.flare-cls--M { background: var(--severity-moderate-soft); color: var(--severity-moderate); }
+-.flare-cls--X { background: var(--severity-strong-soft); color: var(--severity-strong); }
+-.flare-about { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+-.flare-about h3 { font-family: var(--font-ui); font-size: 16px; font-weight: 600; margin: 6px 0; }
+-.flare-about p { margin: 0; font-size: 14px; color: var(--ink-soft); }
+-@media (max-width: 1100px) { .flare-channels { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+-@media (max-width: 900px) {
+-  .flare-hero, .flare-about { grid-template-columns: minmax(0, 1fr); }
+-  .flare-now h2 { font-size: 36px; }
+-  .flare-chart { padding-left: 44px; padding-right: 32px; }
+-}
+-@media (max-width: 560px) { .flare-facts { grid-template-columns: minmax(0, 1fr); } }
+-
+-/* ---------- flare page, time-cursor view (usach.flare.nrt, D-101/D-102) ---------- */
+-.fx [hidden] { display: none !important; }
+-.fx-field { display: grid; gap: 4px; font-family: var(--font-ui); font-size: 12px; color: var(--ink-faint); }
+-.fx-btn.fx-btn--now.on { background: var(--severity-ok); border-color: var(--severity-ok); color: #fff; }
+-.fx-lists { margin-top: 8px; }
+-.fx-lead { max-width: 760px; color: var(--ink-soft); margin: 4px 0 14px; }
+-.fx-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin-top: 22px; background: var(--raised); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 20px; }
+-.fx-bar label { display: grid; gap: 4px; font-family: var(--font-ui); font-size: 12px; color: var(--ink-faint); }
+-.fx-bar input, .fx-bar select, .fx-transport select { font-family: var(--font-mono); font-size: 13px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
+-.fx-btn { font-family: var(--font-ui); font-size: 13px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
++.flare-chart__x { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); margin: 8px 30px 0 40px; }
++.fx-month { margin-top: 14px; }
++.fx-month__cap { font-family: var(--font-ui); font-size: 12px; color: var(--ink-faint); margin-bottom: 6px; }
++.fx-month__plot { position: relative; height: 62px; }
++.fx-month__plot svg { position: absolute; left: 0; top: 0; width: 100%; height: 44px; display: block; cursor: pointer; }
++.fx-month__ticks span { position: absolute; top: 46px; transform: translateX(-50%); font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
++.fx-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
++.fx-btn { min-width: 44px; min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--raised); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--font-ui); font-size: 13px; font-weight: 500; cursor: pointer; padding: 0 12px; }
+ .fx-btn:hover { border-color: var(--accent); }
+-.fx-btn.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+-.fx-msg { font-size: 13px; color: var(--ink-soft); align-self: center; }
+-.fx-chart { padding: 20px 24px 16px; }
+-.fx-chart__plot { height: 260px; cursor: crosshair; }
+-.flare-chart__legend .fx-k { border: 0; height: 9px; border-radius: 2px; }
+-.fx-k--ev { background: var(--severity-strong-soft); }
+-.fx-k--c { background: var(--ink-faint); opacity: .5; }
+-.fx-k--m { background: var(--severity-moderate); }
+-.fx-k--x { background: var(--severity-strong); }
+-.fx-transport { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--grid); }
+-.fx-now { font-family: var(--font-mono); font-size: 17px; font-weight: 500; margin-right: 6px; min-width: 150px; }
+-.fx-transport input[type=range] { flex: 1 1 220px; accent-color: var(--accent); }
+-.fx-check { font-family: var(--font-ui); font-size: 12.5px; color: var(--ink-soft); display: inline-flex; gap: 6px; align-items: center; }
+-.fx-disk-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+-.flare-disk .seg { border-color: rgba(255, 255, 255, .18); }
+-.flare-disk .seg button { color: var(--space-soft); }
+-.flare-disk .seg button.on { background: var(--sun); color: var(--space); }
+-.seg button:disabled { opacity: .4; cursor: not-allowed; }
+-.fx-disk-holder, .fx-ch-img { width: 100%; aspect-ratio: 1 / 1; }
+-.fx-disk-holder img, .fx-ch-img img { width: 100%; height: auto; display: block; border-radius: 8px; background: var(--space-2); }
+-.fx-ch-img { position: relative; background: var(--space-2); border-radius: 8px; }
+-.fx-ch-pic { width: 100%; height: 100%; }
+-.fx-none { height: 100%; display: grid; place-items: center; text-align: center; padding: 16px; font-size: 12.5px; color: var(--space-soft); }
+-.fx-tobs { font-family: var(--font-mono); font-size: 11.5px; }
+-.fx-lists { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+-.fx-lists .sec { margin-top: 0; }
+-.fx .flare-table { max-height: 380px; overflow-y: auto; }
+-.fx .flare-table tbody tr[data-t] { cursor: pointer; }
+-.fx .flare-table tbody tr[data-t]:hover, .fx .flare-table tbody tr[data-t]:focus { background: var(--band); outline: none; }
+-.fx-hit { color: var(--severity-ok); font-family: var(--font-ui); font-weight: 600; font-size: 12.5px; }
+-.fx-miss { color: var(--severity-strong); font-family: var(--font-ui); font-size: 12.5px; }
+-@media (max-width: 900px) { .fx-lists { grid-template-columns: minmax(0, 1fr); } }
++.fx-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
++.fx-btn--play { background: var(--ink); color: var(--raised); border-color: var(--ink); min-width: 52px; }
++.fx-btn--play svg { fill: currentColor; stroke: none; }
++.fx-btn--play .fx-i-pause, .fx-btn--play.on .fx-i-play { display: none; }
++.fx-btn--play.on .fx-i-pause { display: block; }
++.fx-btn--now { margin-left: auto; border-color: var(--severity-ok); color: var(--severity-ok); }
++.fx-btn--now.on { background: var(--severity-ok); color: var(--raised); }
++.fx-now-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
++.fx-pos { font-family: var(--font-mono); font-size: 13px; color: var(--ink-soft); margin-left: 8px; }
++.fx-msg { font-size: 13px; color: var(--ink-soft); }
++.fx-keys { margin: 10px 0 0; font-family: var(--font-ui); font-size: 12px; color: var(--ink-faint); }
++
++.fx-sum { margin-top: 16px; overflow: hidden; }
++.fx-sum__head, .fx-list__head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 16px 20px 0; }
++.fx-sum__head span { font-family: var(--font-ui); font-size: 12.5px; color: var(--ink-faint); }
++.fx-sum__tiles { display: flex; flex-wrap: wrap; margin: 8px 0 0 -1px; }
++.fx-tile { flex: 1 1 180px; min-width: 0; padding: 18px 20px; border-left: 1px solid var(--line); }
++.fx-tile__k { font-family: var(--font-ui); font-size: 12.5px; color: var(--ink-faint); }
++.fx-tile__v { font-family: var(--font-mono); font-size: 30px; font-weight: 600; margin-top: 2px; }
++.fx-tile__s { font-size: 12.5px; color: var(--ink-soft); }
++
++.fx-list { margin: 16px 0 56px; padding-bottom: 6px; }
++.fx-list__scroll { overflow: auto; max-height: 520px; margin-top: 6px; }
++.fx-tbl { width: 100%; border-collapse: collapse; min-width: 760px; }
++.fx-tbl th { position: sticky; top: 0; background: var(--raised); font-family: var(--font-ui); font-size: 12px; font-weight: 500; color: var(--ink-faint); text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
++.fx-tbl td { padding: 12px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 13px; vertical-align: middle; }
++.fx-tbl tr[data-t] { cursor: pointer; }
++.fx-tbl tr[data-t]:hover, .fx-tbl tr[data-t]:focus { background: var(--band); outline: none; }
++.fx-tbl tr.cur td { background: var(--s1-band); }
++.fx-chip { display: inline-block; font-family: var(--font-ui); font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
++.fx-chip--hit { background: var(--severity-ok-soft); color: var(--severity-ok); }
++.fx-chip--miss { background: var(--severity-strong-soft); color: var(--severity-strong); }
++.fx-chip--fa { background: var(--severity-minor-soft); color: var(--severity-minor); }
++.fx-chip--c { background: var(--band); color: var(--ink-soft); }
++.fx-chip--open { background: var(--severity-strong); color: var(--raised); }
++@media (max-width: 560px) {
++  .fx-band { padding-bottom: 96px; }
++  .fx-tl { padding: 18px 14px 14px; }
++  .fx-chart.is-echarts { height: 300px; }
++  .fx-btn--now { margin-left: 0; }
++}
+diff --git a/web/static/web/js/flare-page.js b/web/static/web/js/flare-page.js
+index f1b311c..873768f 100644
+--- a/web/static/web/js/flare-page.js
++++ b/web/static/web/js/flare-page.js
+@@ -1,10 +1,15 @@
+-/* The flare page (usach.flare.nrt, model Centella, D-102): turns the
++/* The flare page (usach.flare.nrt, model Centella, D-102/D-103): turns the
+  * server-rendered first paint into a time-cursor view. Two sources: the
+  * live service ("vivo": follows now, refreshes every 60 s) and, when the
+  * portal is configured with one, a replayed archive ("archivo"). Data and
+  * images come through the portal's proxies (#fx-config); timeline in
+- * vendored ECharts (no build step, no CDN, D-002). The instant, window,
+- * view and source live in the URL hash. */
++ * vendored ECharts (no build step, no CDN, D-002).
++ *
++ * Two time spans: the *window* (what the timeline shows, 6 h … 7 d, or the
++ * whole archive) and the *period* (the last 24 h live, the whole archive
++ * otherwise), which feeds the summary tiles, the list of flares and alerts
++ * and the archive's month strip. Source, window, instant and view live in
++ * the URL hash. */
+ (function () {
+   "use strict";
+ 
+@@ -13,13 +18,15 @@
+   var CFG = JSON.parse(cfgEl.textContent);
+   var T = CFG.i18n, U = CFG.urls;
+   var WAVES = [131, 171, 304, 1600];
+-  var MIN = 60e3, POLL_MS = 60e3, STALE_MS = 20 * MIN;
++  var MIN = 60e3, DAY = 86400e3, POLL_MS = 60e3, STALE_MS = 20 * MIN, MAX_PERIOD = 40 * DAY;
+   var $ = function (id) { return document.getElementById(id); };
+ 
+   var S = {
+-    src: "vivo", follow: true, all: [], frames: [], idx: -1, events: [], flares: [], xray: [], thr: 0.8,
+-    kind: "img", disk: "img", playing: false, timer: null, poll: null, req: 0,
+-    t0: 0, t1: 0, range: null, chart: null,
++    src: "vivo", follow: true, span: "1", fps: 2,
++    all: [], frames: [], idx: -1, events: [], flares: [], xray: [], thr: 0.8,
++    kind: "img", disk: "img", playing: false, timer: null, poll: null, clock: null, req: 0,
++    t0: 0, t1: 0, range: null, chart: null, loadedAt: 0,
++    ov: { t0: 0, t1: 0, all: [], events: [], flares: [] },
+   };
+ 
+   // ---- formatting ----------------------------------------------------------
+@@ -30,18 +37,50 @@
+   function hm(ms) { var d = new Date(ms); return pad(d.getUTCHours()) + ":" + pad(d.getUTCMinutes()); }
+   function dayLabel(ms) { var d = new Date(ms); return pad(d.getUTCDate()) + "-" + MONTHS[d.getUTCMonth()]; }
+   function dt(ms) { return dayLabel(ms) + " " + hm(ms); }
++  function dtY(ms) { return dayLabel(ms) + "-" + new Date(ms).getUTCFullYear() + " · " + hm(ms) + " UT"; }
+   function num(v, digits) {
+     return new Intl.NumberFormat(CFG.lang === "en" ? "en-US" : "es-CL",
+       { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
+   }
++  function fill(s, o) { return s.replace(/\{(\w+)\}/g, function (_, k) { return o[k]; }); }
+   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+   function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+   function letter(cls) { return (cls || "?").charAt(0).toUpperCase(); }
+-  function goesLetterOf(flux) {
+-    var L = [["X", 1e-4], ["M", 1e-5], ["C", 1e-6], ["B", 1e-7], ["A", 1e-8]];
+-    for (var i = 0; i < L.length; i++) if (flux >= L[i][1]) return L[i][0];
++  function isMX(f) { var L = letter(f["class"]); return L === "M" || L === "X"; }
++  var BASE = { A: 1e-8, B: 1e-7, C: 1e-6, M: 1e-5, X: 1e-4 };
++  function classFlux(cls) { return (BASE[letter(cls)] || 1e-8) * (parseFloat(String(cls).slice(1)) || 1); }
++  function classOf(flux) {
++    var L = ["X", "M", "C", "B", "A"];
++    for (var i = 0; i < L.length; i++) if (flux >= BASE[L[i]]) return L[i] + (flux / BASE[L[i]]).toFixed(1);
+     return "";
+   }
++  function goesLetterOf(flux) { var c = classOf(flux); return c ? c.charAt(0) : ""; }
++  function clsChip(cls) { return '<span class="fx-cls fx-cls--' + letter(cls) + '">' + esc(cls) + "</span>"; }
++
++  // Helioprojective arcsec → "N14 W31" (same low-precision ephemeris as web/flare_page.py heliographic())
++  function heliographic(x, y, ms) {
++    var d = (ms - Date.UTC(2000, 0, 1, 12)) / DAY, rad = Math.PI / 180;
++    var g = (357.529 + 0.98560028 * d) * rad;
++    var R = 959.63 / (1.00014 - 0.01671 * Math.cos(g) - 0.00014 * Math.cos(2 * g));
++    var lam = (280.459 + 0.98564736 * d + 1.915 * Math.sin(g)) * rad;
++    var node = (75.76 + 0.01397 * (new Date(ms).getUTCFullYear() - 1850)) * rad;
++    var b0 = Math.asin(Math.sin(lam - node) * Math.sin(7.25 * rad));
++    var u = x / R, v = y / R;
++    if (u * u + v * v >= 1) return "";
++    var w = Math.sqrt(1 - u * u - v * v);
++    var lat = Math.asin(v * Math.cos(b0) + w * Math.sin(b0)) / rad;
++    var lon = Math.atan2(u, w * Math.cos(b0) - v * Math.sin(b0)) / rad;
++    return (lat >= 0 ? "N" : "S") + pad(Math.round(Math.abs(lat))) + " " + (lon >= 0 ? "W" : "E") + pad(Math.round(Math.abs(lon)));
++  }
++  function arcsec(c) { return (c[0] >= 0 ? "+" : "") + Math.round(c[0]) + "″, " + (c[1] >= 0 ? "+" : "") + Math.round(c[1]) + "″"; }
++  function hgOf(loc, ms) { return loc && loc.centroid_arcsec && !loc.on_limb ? heliographic(loc.centroid_arcsec[0], loc.centroid_arcsec[1], ms) : ""; }
++  function locText(loc, ms) {
++    if (!loc || !loc.centroid_arcsec) return "—";
++    var c = loc.centroid_arcsec;
++    if (loc.on_limb) return arcsec(c) + " · " + (c[0] > 0 ? T.limb_w : T.limb_e);
++    var hg = hgOf(loc, ms);
++    return (hg ? hg + " · " : "") + arcsec(c);
++  }
+ 
+   function getJSON(url) {
+     return fetch(url, { headers: { Accept: "application/json" } }).then(function (r) {
+@@ -55,93 +94,137 @@
+   }
+   function withSrc(url, params) { return q(url, Object.assign({ fuente: S.src }, params || {})); }
+   function msg(text) { $("fx-msg").textContent = text || ""; }
++  function points(se) { return se.points.map(function (x) { return { t: Date.parse(x[0]), slot: x[0], p: x[1], state: x[2], status: x[3] }; }); }
++  function evs(ev) { return ev.events.map(function (e) { return Object.assign({}, e, { a: Date.parse(e.t_start), b: Date.parse(e.t_end), pk: Date.parse(e.t_pmax) }); }); }
++  function fls(fl) { return fl.flares.map(function (f) { return Object.assign({}, f, { a: Date.parse(f.tstart), pk: Date.parse(f.tpeak), b: Date.parse(f.tend) }); }); }
++  function within(list, a, b) { return list.filter(function (x) { return x.b >= a && x.a <= b; }); }
+ 
+-  // ---- source, window, loading --------------------------------------------
++  // ---- source, window, period ----------------------------------------------
++  function live() { return S.src === "vivo"; }
+   function setSrc(src) {
+     S.src = src;
+     if ($("fx-src-vivo")) {
+       $("fx-src-vivo").classList.toggle("on", src === "vivo");
+       $("fx-src-archivo").classList.toggle("on", src === "archivo");
+     }
+-    $("fx-now-btn").hidden = src !== "vivo";
++    $("fx-span-all").hidden = src !== "archivo";
++    if (src === "vivo" && S.span === "all") S.span = "1";
++    $("fx-month").hidden = src !== "archivo";
++    $("fx-now-label").textContent = src === "vivo" ? T.now : T.back_live;
++    markSpan();
+   }
++  function markSpan() {
++    document.querySelectorAll("#fx-spans button").forEach(function (b) { b.classList.toggle("on", b.dataset.span === S.span); });
++  }
++  function spanMs() { return S.span === "all" ? Math.max(S.ov.t1 - S.ov.t0, DAY) : parseFloat(S.span) * DAY; }
++  function bounds() {
++    if (live()) return [-Infinity, Date.now()];
++    return [S.ov.t0 || -Infinity, S.ov.t1 || Date.now()];
++  }
++  function windowAround(t) {
++    var span = spanMs(), b = bounds();
++    if (S.span === "all" && !live()) { S.t0 = S.ov.t0; S.t1 = S.ov.t1; return; }
++    var t0 = t - span / 2, t1 = t0 + span;
++    if (t1 > b[1]) { t1 = b[1]; t0 = t1 - span; }
++    if (t0 < b[0]) { t0 = b[0]; t1 = t0 + span; }
++    if (span >= b[1] - b[0]) { t0 = b[0]; t1 = b[1]; }   // a window wider than the archive: the archive
++    S.t0 = t0; S.t1 = t1;
++  }
++  function windowNow() { S.t1 = Date.now(); S.t0 = S.t1 - spanMs(); }
+ 
+   function init() {
+-    document.querySelectorAll(".fx-js-only").forEach(function (el) { el.hidden = false; });
+-    $("fx-bar").hidden = false; $("fx-transport").hidden = false; $("fx-disk-seg").hidden = false;
++    document.querySelectorAll(".fx-js-only").forEach(function (el) { el.removeAttribute("hidden"); });   // SVG has no .hidden
+     var h = new URLSearchParams(location.hash.slice(1));
+-    setSrc(h.get("fuente") === "archivo" && CFG.has_archive ? "archivo" : "vivo");
++    var src = h.get("fuente") === "archivo" && CFG.has_archive ? "archivo" : "vivo";
++    if (["0.25", "1", "3", "7", "all"].indexOf(h.get("ventana")) >= 0) S.span = h.get("ventana");
++    setSrc(src);
+     if (h.get("vista") === "diferencia" || /vista=diferencia/.test(location.search)) setKind("diff", true);
+-    if (h.get("ventana")) $("fx-span").value = h.get("ventana");
+-    S.follow = S.src === "vivo" && !h.get("t");
+-    start(h.get("desde"), h.get("t"));
++    S.follow = live() && !h.get("t");
++    start(h.get("t"));
+   }
+ 
+-  function start(desde, seekTo) {
++  // the period: live, the last 24 h; archive, everything it holds (≤ 40 days)
++  function loadPeriod() {
++    var a, b;
++    if (live()) { b = Date.now(); a = b - DAY; }
++    else {
++      if (!S.range || !S.range.first) return Promise.resolve();
++      a = Date.parse(S.range.first); b = Date.parse(S.range.last) + 2 * MIN;
++      if (b - a > MAX_PERIOD) a = b - MAX_PERIOD;
++    }
++    var p = { start: iso(a), end: iso(b) };
++    return Promise.all([
++      getJSON(withSrc(U.series, p)), getJSON(withSrc(U.events, p)),
++      getJSON(withSrc(U.flares, p)).catch(function () { return { flares: [] }; }),
++    ]).then(function (r) {
++      S.ov = { t0: a, t1: b, all: points(r[0]), events: evs(r[1]), flares: fls(r[2]) };
++      S.thr = r[0].threshold || S.thr;
++      renderSummary(); renderList(); drawMonth();
++    });
++  }
++
++  function start(seekTo) {
+     clearInterval(S.poll);
++    play(false);
+     msg(T.loading);
+     return getJSON(withSrc(U.range)).then(function (r) {
+       S.range = r;
+-      var pill = $("fx-range");
+-      pill.hidden = !r.first;
+-      pill.textContent = r.first ? (S.src === "archivo" ? "↺ " : "") + T.data + ": " + dt(Date.parse(r.first)) + " → " +
+-        dt(Date.parse(r.last)) + " UT" : "";
+-      var span = parseFloat($("fx-span").value) * 86400e3;
+-      var anchor = S.src === "vivo" ? Date.now() : (r.last ? Date.parse(r.last) : Date.now());
+-      var t0 = desde ? Date.parse(desde + ":00Z") : anchor - span;
+-      $("fx-start").value = iso(t0).slice(0, 16);
+-      if (S.src === "vivo") S.poll = setInterval(refreshLive, POLL_MS);
+-      return load(seekTo);
++      return loadPeriod();
++    }).then(function () {
++      var t;
++      if (seekTo) t = Date.parse(seekTo);
++      else if (live()) t = null;
++      else {   // archive: open on its most recent event, else its last frame
++        var e = S.ov.events[S.ov.events.length - 1];
++        t = e ? e.a : (S.range && S.range.last ? Date.parse(S.range.last) : Date.now());
++      }
++      if (t === null || (live() && S.follow)) windowNow(); else windowAround(t);
++      if (live()) S.poll = setInterval(refreshLive, POLL_MS);
++      return load(t === null ? null : iso(t));
+     }).catch(function () { msg(T.unreachable); });
+   }
+ 
+-  // live: keep the window ending now, and the cursor on the newest frame while following
+   function refreshLive() {
+-    if (S.src !== "vivo" || S.playing || document.hidden) return;
+-    var span = parseFloat($("fx-span").value) * 86400e3;
+-    var winEnd = Date.parse($("fx-start").value + ":00Z") + span;
+-    if (S.follow && Date.now() - winEnd > -5 * MIN) $("fx-start").value = iso(Date.now() - span).slice(0, 16);
+-    var keep = S.frames[S.idx] ? S.frames[S.idx].t : null;
+-    load(S.follow ? null : keep && iso(keep));
++    if (!live() || S.playing || document.hidden) return;
++    var keep = S.frames[S.idx] ? iso(S.frames[S.idx].t) : null;
++    if (S.follow) windowNow();
++    loadPeriod().catch(function () {}).then(function () { load(S.follow ? null : keep); });
+   }
+ 
+   function load(seekTo) {
+-    var t0 = Date.parse($("fx-start").value + ":00Z");
+-    var days = parseFloat($("fx-span").value);
+-    if (isNaN(t0)) return Promise.resolve();
+-    var t1 = t0 + days * 86400e3;
+-    var p = { start: iso(t0), end: iso(t1) };
++    var t0 = S.t0, t1 = S.t1, days = (t1 - t0) / DAY, p = { start: iso(t0), end: iso(t1) };
++    var inPeriod = t0 >= S.ov.t0 && t1 <= S.ov.t1 + 5 * MIN && S.ov.all.length;
+     var xrayP = days <= 14 ? getJSON(q(U.xray, p)).catch(function () { return { points: [] }; }) : Promise.resolve({ points: [] });
+-    return Promise.all([
++    var dataP = inPeriod ? Promise.resolve(null) : Promise.all([
+       getJSON(withSrc(U.series, p)), getJSON(withSrc(U.events, p)),
+-      getJSON(withSrc(U.flares, p)).catch(function () { return { flares: [] }; }), xrayP,
+-    ]).then(function (res) {
+-      var se = res[0], ev = res[1], fl = res[2], xr = res[3];
+-      S.thr = se.threshold;
+-      S.t0 = t0; S.t1 = t1;
+-      S.all = se.points.map(function (x) { return { t: Date.parse(x[0]), slot: x[0], p: x[1], state: x[2], status: x[3] }; });
+-      S.events = ev.events.map(function (e) {
+-        return Object.assign({}, e, { a: Date.parse(e.t_start), b: Date.parse(e.t_end), pk: Date.parse(e.t_pmax) });
+-      });
+-      S.flares = fl.flares.map(function (f) {
+-        return Object.assign({}, f, { a: Date.parse(f.tstart), pk: Date.parse(f.tpeak), b: Date.parse(f.tend) });
+-      });
+-      S.xray = xr.points.map(function (x) { return [Date.parse(x[0]), x[1]]; });
++      getJSON(withSrc(U.flares, p)).catch(function () { return { flares: [] }; }),
++    ]);
++    return Promise.all([dataP, xrayP]).then(function (res) {
++      if (res[0]) {
++        S.thr = res[0][0].threshold || S.thr;
++        S.all = points(res[0][0]); S.events = evs(res[0][1]); S.flares = fls(res[0][2]);
++      } else {
++        S.all = S.ov.all.filter(function (f) { return f.t >= t0 && f.t <= t1; });
++        S.events = within(S.ov.events, t0, t1); S.flares = within(S.ov.flares, t0, t1);
++      }
++      S.frames = S.all;
++      S.xray = res[1].points.map(function (x) { return [Date.parse(x[0]), x[1]]; });
++      S.loadedAt = Date.now();
+       $("fx-thr").style.left = (100 * S.thr) + "%";
+-      $("fx-thr-label").textContent = T.threshold + " " + num(S.thr, 2);
+-      $("fx-tl-eyebrow").textContent = (S.src === "vivo" ? T.live : T.window) + " · " + dt(t0) + " → " + dt(t1) + " UT";
+-      applyFilter();
+-      drawChart();
+-      renderLists();
++      $("fx-thr-label").textContent = T.alert + " " + num(S.thr, 2);
++      drawChart(); drawMonth(); srcLine();
+       msg("");
+       var want = seekTo ? Date.parse(seekTo) : (S.frames.length ? S.frames[S.frames.length - 1].t : t0);
+       seek(want, true);
+     }).catch(function () { msg(T.unreachable); });
+   }
+ 
+-  function applyFilter() {
+-    S.frames = $("fx-okonly").checked ? S.all.filter(function (f) { return f.status === "ok"; }) : S.all;
+-    $("fx-scrub").max = Math.max(0, S.frames.length - 1);
++  // go to an instant anywhere in the period: re-window when it is outside the window
++  function goTo(t) {
++    play(false);
++    if (live()) S.follow = false;
++    if (t >= S.t0 && t <= S.t1) { seek(t); return; }
++    windowAround(t); load(iso(t));
+   }
+ 
+   // ---- the instant ---------------------------------------------------------
+@@ -154,19 +237,20 @@
+   }
+   function seek(t, auto) { show(nearest(t), auto); }
+   function goesAt(t) {
+-    for (var i = 0; i < S.flares.length; i++) {
+-      var f = S.flares[i];
+-      if (f.a - 10 * MIN <= t && t <= f.b + 5 * MIN) return f;
+-    }
++    var all = S.flares.concat(S.ov.flares);
++    for (var i = 0; i < all.length; i++) { var f = all[i]; if (f.a - 10 * MIN <= t && t <= f.b + 5 * MIN) return f; }
+     return null;
+   }
+   function eventAt(t) {
+-    for (var i = 0; i < S.events.length; i++) {
+-      var e = S.events[i];
+-      if (e.a <= t && t <= e.b + 10 * MIN) return e;
+-    }
++    var all = S.events.concat(S.ov.events);
++    for (var i = 0; i < all.length; i++) { var e = all[i]; if (e.a <= t && t <= e.b + 10 * MIN) return e; }
+     return null;
+   }
++  function xrayAt(t) {
++    var best = null;
++    S.xray.forEach(function (x) { if (Math.abs(x[0] - t) <= 5 * MIN && (!best || Math.abs(x[0] - t) < Math.abs(best[0] - t))) best = x; });
++    return best;
++  }
+   function imgUrl(slot, w, kind) {
+     return withSrc(U.image.replace("WAVE", w), Object.assign({ slot: slot }, kind === "diff" ? { tipo: "diferencia" } : {}));
+   }
+@@ -182,19 +266,21 @@
+   }
+ 
+   function show(i, auto) {
+-    if (i < 0 || !S.frames.length) { $("fx-now").textContent = T.no_data; return; }
++    if (i < 0 || !S.frames.length) { $("fx-now").textContent = T.no_data; $("fx-pos").textContent = ""; return; }
+     S.idx = Math.max(0, Math.min(S.frames.length - 1, i));
+     var last = S.idx === S.frames.length - 1;
+-    if (!auto && S.src === "vivo") S.follow = last;
+-    $("fx-now-btn").classList.toggle("on", S.src === "vivo" && S.follow);
++    if (!auto && live()) S.follow = last && S.t1 >= Date.now() - 5 * MIN;
++    $("fx-now-btn").classList.toggle("on", live() && S.follow);
+     var f = S.frames[S.idx];
+-    $("fx-scrub").value = S.idx;
+-    $("fx-now").textContent = dt(f.t) + " UT";
++    $("fx-now").textContent = dtY(f.t);
++    $("fx-pos").textContent = live() && S.follow ? T.latest : fill(T.pos, { i: num(S.idx + 1, 0), n: num(S.frames.length, 0) });
+     moveCursor(f.t);
+-    var hash = "fuente=" + S.src + "&ventana=" + $("fx-span").value + (S.kind === "diff" ? "&vista=diferencia" : "");
+-    if (!(S.src === "vivo" && S.follow)) hash = "t=" + f.slot + "&desde=" + $("fx-start").value + "&" + hash;
++    markRow(f.t);
++    var hash = "fuente=" + S.src + "&ventana=" + S.span + (S.kind === "diff" ? "&vista=diferencia" : "");
++    if (!(live() && S.follow)) hash = "t=" + f.slot + "&" + hash;
+     history.replaceState(null, "", "#" + hash);
+     renderState(f, null);
++    srcLine();
+     var req = ++S.req;
+     getJSON(withSrc(U.frame.replace("SLOT", f.slot))).catch(function () {
+       return { images: [], differences: [], gradcam: false, row: null };
+@@ -206,51 +292,66 @@
+     });
+   }
+ 
++  function stateKey(f) {
++    if (live() && S.follow && Date.now() - f.t > STALE_MS) return "stale";
++    if (f.status !== "ok") return "none";
++    if (["quiet", "onset", "active", "decay"].indexOf(f.state) >= 0) return f.state;
++    return f.p >= S.thr ? "active" : "quiet";
++  }
++
+   function renderState(f, row) {
+-    var box = $("fx-state");
+-    var ok = f.status === "ok";
+-    var open = ok && f.state && f.state !== "quiet";
+-    var live = S.src === "vivo" && S.follow;
+-    var stale = live && Date.now() - f.t > STALE_MS;
+-    box.className = "flare-now " + (stale ? "flare-now--stale" : open ? "flare-now--flare" : ok ? "flare-now--quiet" : "flare-now--stale");
+-    $("fx-state-eyebrow").textContent = (live ? T.now : T.at + " · " + dt(f.t) + " UT") + (open ? " · " + T.event_open : "");
+-    $("fx-state-h").textContent = stale ? T.stale : open ? T.flare : ok ? T.quiet : T.no_result;
++    var key = stateKey(f), ok = f.status === "ok";
++    var open = key === "onset" || key === "active" || key === "decay";
++    var e = open ? eventAt(f.t) : null;
++    $("fx-state").className = "fx-card fx-state fx-st--" + key;
++    $("fx-state-eyebrow").textContent = (live() && S.follow ? T.now : T.at) + (e ? " · " + T.event_since + " " + hm(e.a) + " UT" : "");
++    $("fx-state-h").textContent = T["st_" + key];
++    document.querySelectorAll("#fx-steps li").forEach(function (li) { li.classList.toggle("on", li.dataset.k === key); });
+     $("fx-meter").style.display = ok ? "" : "none";
+     if ($("fx-pending")) $("fx-pending").hidden = true;
+     if (ok) {
+       $("fx-p").textContent = num(f.p, 2);
+       $("fx-fill").style.width = Math.max(0, Math.min(100, 100 * f.p)) + "%";
++      spark(f.t);
+     }
+     $("fx-obs").textContent = dt(f.t) + " UT";
+-    var g = goesAt(f.t);
+-    $("fx-goes").innerHTML = g ? '<span class="flare-cls flare-cls--' + letter(g["class"]) + '">' + esc(g["class"]) + "</span> " +
+-      T.peak + " " + hm(g.pk) : "—";
+-    if (!row) return;
+-    $("fx-lat").textContent = row.data_latency_s != null ? Math.round(row.data_latency_s / 60) + " " + T.delay : "—";
++    var g = goesAt(f.t), x = xrayAt(f.t);
++    $("fx-goes").innerHTML = g ? clsChip(g["class"]) + " " + T.peak + " " + hm(g.pk)
++      : x ? clsChip(classOf(x[1])) + " " + esc(T.flux_now) : "—";
++
+     var note = "";
+-    if (!ok) note = T["status_" + f.status] || f.status;
+-    else {
+-      var e = eventAt(f.t);
+-      if (open && e) note = T.detected_since + " " + hm(e.a) + " UT";
+-      if (row.location && row.location.centroid_arcsec) {
+-        var c = row.location.centroid_arcsec;
+-        note += (note ? " · " : "") + T.location + " " + (c[0] >= 0 ? "+" : "") + Math.round(c[0]) + "″, " +
+-          (c[1] >= 0 ? "+" : "") + Math.round(c[1]) + "″";
+-      }
+-      if (row.n_baseline_used) note += (note ? ". " : "") + T.compared + " " + row.n_baseline_used + " " + T.of + " " + row.n_baseline + " " + T.frames_before + ".";
+-    }
++    if (key === "stale") note = fill(T.stale_note, { m: Math.round((Date.now() - f.t) / MIN) });
++    else if (!ok) note = T["status_" + f.status] || f.status;
++    else if (e && key !== "decay") note = T.alert_since + " " + hm(e.a) + " UT.";
++    else if (key === "decay") note = T.decay_note;
++    else if (row && row.n_baseline_used) note = fill(T.compared, { n: row.n_baseline_used, of: row.n_baseline || 3 });
+     $("fx-note").textContent = note;
+-    // the flare's box: this slot's location, else (decay) the open event's
+-    var ev = open ? eventAt(f.t) : null;
+-    var b = boxFor(row.location || (ev && ev.location));
++    if (!row) return;
++
++    // the flare's box and location: this slot's, else (decay) the open event's
++    var loc = open ? (row.location || (e && e.location)) : null;
++    $("fx-loc").textContent = loc ? locText(loc, f.t) : "—";
++    var b = boxFor(loc), hg = hgOf(loc, f.t);
++    var label = (g && isMX(g) ? g["class"] + (hg ? " · " : "") : "") + (hg || (g ? "" : "flare"));
+     document.querySelectorAll(".fx-box").forEach(function (el) {
+       if (!b) { el.hidden = true; return; }
+       el.style.left = b.left + "%"; el.style.top = b.top + "%";
+       el.style.width = b.size + "%"; el.style.height = b.size + "%";
++      el.dataset.label = label || "flare";
+       el.hidden = false;
+     });
+   }
+ 
++  function spark(t) {
++    var a = t - 60 * MIN, pts = S.all.filter(function (f) { return f.t >= a && f.t <= t && f.p != null; });
++    if (pts.length < 2) { $("fx-spark-l").setAttribute("d", ""); $("fx-spark-a").setAttribute("d", ""); return; }
++    var d = pts.map(function (f, i) { return (i ? "L" : "M") + ((f.t - a) / (60 * MIN) * 300).toFixed(1) + " " + (40 - f.p * 40).toFixed(1); }).join(" ");
++    var x0 = ((pts[0].t - a) / (60 * MIN) * 300).toFixed(1), x1 = ((pts[pts.length - 1].t - a) / (60 * MIN) * 300).toFixed(1);
++    $("fx-spark-l").setAttribute("d", d);
++    $("fx-spark-a").setAttribute("d", d + " L" + x1 + " 40 L" + x0 + " 40 Z");
++    $("fx-spark").querySelector(".fx-spark__thr").setAttribute("d", "M0 " + (40 - S.thr * 40) + " H300");
++  }
++
+   // same box as web/flare_page.py flare_box(): the region's bounding box + 30″ a side
+   // (or its area around the centroid), at least 160″, as % of the north-up preview
+   function boxFor(loc) {
+@@ -269,30 +370,27 @@
+   }
+ 
+   function renderImages(f, d) {
+-    var camBtn = $("fx-disk-cam");
+-    camBtn.disabled = !d.gradcam;
+-    if (!d.gradcam && S.disk === "cam") S.disk = "img";
+-    $("fx-disk-img").classList.toggle("on", S.disk === "img");
+-    camBtn.classList.toggle("on", S.disk === "cam");
++    var has131 = d.images.indexOf(131) >= 0, dif131 = d.differences.indexOf(131) >= 0;
++    $("fx-disk-cam").disabled = !d.gradcam;
++    $("fx-disk-diff").disabled = !dif131;
++    if ((S.disk === "cam" && !d.gradcam) || (S.disk === "diff" && !dif131)) S.disk = "img";
++    ["img", "diff", "cam"].forEach(function (k) { $("fx-disk-" + k).classList.toggle("on", S.disk === k); });
+     var holder = $("fx-disk").querySelector(".fx-disk-holder");
+     if (S.disk === "cam") {
+       setImg(holder, withSrc(U.gradcam.replace("SLOT", f.slot)), "Grad-CAM", T.no_gradcam);
+-      $("fx-disk-label").textContent = "AIA 131 Å + Grad-CAM · " + hm(f.t) + " UT";
+-      $("fx-disk-cap").textContent = T.cam_cap;
++      $("fx-disk-label").textContent = T.disk_cam + " · " + hm(f.t) + " UT";
++    } else if (S.disk === "diff") {
++      setImg(holder, imgUrl(f.slot, 131, "diff"), T.disk_diff, T.no_diff);
++      $("fx-disk-label").textContent = T.disk_diff + " · " + hm(f.t) + " UT";
+     } else {
+-      setImg(holder, d.images.indexOf(131) >= 0 ? imgUrl(f.slot, 131, "img") : null, "AIA 131 Å", T.no_image);
++      setImg(holder, has131 ? imgUrl(f.slot, 131, "img") : null, "AIA 131 Å", T.no_image);
+       $("fx-disk-label").textContent = "AIA 131 Å · " + hm(f.t) + " UT";
+-      $("fx-disk-cap").textContent = T.loc_cap;
+     }
+-    var row = d.row || {};
+-    $("fx-sun-eyebrow").textContent = "AIA · " + dt(f.t) + " UT";
+-    document.querySelectorAll(".flare-ch[data-wave]").forEach(function (fig) {
++    document.querySelectorAll(".fx-ch[data-wave]").forEach(function (fig) {
+       var w = parseInt(fig.dataset.wave, 10);
+       var have = S.kind === "img" ? d.images.indexOf(w) >= 0 : d.differences.indexOf(w) >= 0;
+       var why = S.kind === "diff" && d.images.indexOf(w) >= 0 ? T.no_diff : T.no_image;
+       setImg(fig.querySelector(".fx-ch-pic"), have ? imgUrl(f.slot, w, S.kind) : null, "AIA " + w + " Å", why);
+-      var tobs = row.inputs && row.inputs[String(w)];
+-      fig.querySelector(".fx-tobs").textContent = tobs ? "T_OBS " + tobs.slice(11, 19) : "";
+     });
+   }
+ 
+@@ -308,11 +406,24 @@
+     }
+   }
+ 
++  // ---- the band's status line ----------------------------------------------
++  function srcLine() {
++    var el = $("fx-srcline");
++    if (!live()) {
++      el.textContent = S.ov.t0 ? T.archive_src + " · " + dt(S.ov.t0) + " → " + dt(S.ov.t1) + " UT" : T.archive_src;
++      return;
++    }
++    var f = S.frames[S.frames.length - 1];
++    var s = Math.max(0, Math.round((Date.now() - S.loadedAt) / 1000));
++    el.innerHTML = '<span class="dot" style="background:var(--status-ok)" aria-hidden="true"></span> ' +
++      esc(fill(T.updated, { s: s })) + (f ? " · " + esc(fill(T.image_ago, { m: Math.round((Date.now() - f.t) / MIN) })) : "");
++  }
++
+   // ---- playback ------------------------------------------------------------
+   function play(on) {
+     S.playing = on;
+-    $("fx-play").textContent = on ? "⏸" : "▶";
+     $("fx-play").classList.toggle("on", on);
++    $("fx-play").setAttribute("aria-label", on ? T.pause : T.play);
+     clearTimeout(S.timer);
+     if (on) tick();
+   }
+@@ -320,47 +431,46 @@
+     if (!S.playing) return;
+     if (S.idx >= S.frames.length - 1) { play(false); return; }
+     show(S.idx + 1);
+-    S.timer = setTimeout(tick, 1000 / parseFloat($("fx-fps").value));
++    S.timer = setTimeout(tick, 1000 / S.fps);
+   }
+   function jumpEvent(dir) {
+     var t = S.frames[S.idx] ? S.frames[S.idx].t : S.t0;
+-    var marks = S.events.map(function (e) { return e.a; })
+-      .concat(S.flares.filter(function (f) { return letter(f["class"]) !== "C"; }).map(function (f) { return f.a - 10 * MIN; }))
++    var marks = S.ov.events.concat(S.events).map(function (e) { return e.a; })
++      .concat(S.ov.flares.concat(S.flares).filter(isMX).map(function (f) { return f.a - 10 * MIN; }))
+       .sort(function (a, b) { return a - b; });
+     var m = null;
+-    if (dir > 0) { for (var i = 0; i < marks.length; i++) if (marks[i] > t + 1) { m = marks[i]; break; } }
+-    else { for (var j = marks.length - 1; j >= 0; j--) if (marks[j] < t - 1) { m = marks[j]; break; } }
+-    if (m !== null) seek(m);
++    if (dir > 0) { for (var i = 0; i < marks.length; i++) if (marks[i] > t + MIN) { m = marks[i]; break; } }
++    else { for (var j = marks.length - 1; j >= 0; j--) if (marks[j] < t - MIN) { m = marks[j]; break; } }
++    if (m !== null) goTo(m);
+   }
+   function setKind(k, silent) {
+     S.kind = k;
+     $("fx-k-img").classList.toggle("on", k === "img");
+     $("fx-k-diff").classList.toggle("on", k === "diff");
+-    $("fx-help").textContent = k === "diff" ? T.help_diff : T.help_img;
+     if (!silent && S.frames.length) show(S.idx, true);
+   }
+ 
+-  // ---- timeline (ECharts) --------------------------------------------------
++  // ---- timeline (ECharts): probability lane on top, GOES lane below ---------
+   function drawChart() {
+     if (!window.echarts) return;
+     var el = $("fx-chart");
+     if (!S.chart) {
+       el.innerHTML = "";
+-      el.classList.add("fx-chart__plot");
++      el.classList.add("is-echarts");
+       S.chart = window.echarts.init(el, null, { renderer: "canvas" });
+       window.addEventListener("resize", function () { S.chart.resize(); });
+       var down = null;
+       S.chart.getZr().on("mousedown", function (e) { down = [e.offsetX, e.offsetY]; });
+       S.chart.getZr().on("click", function (e) {
+         if (down && Math.abs(down[0] - e.offsetX) + Math.abs(down[1] - e.offsetY) > 4) return; // a drag, not a click
+-        var p = S.chart.convertFromPixel({ gridIndex: 0 }, [e.offsetX, e.offsetY]);
+-        if (p && isFinite(p[0])) { play(false); seek(p[0]); }
++        var p = S.chart.convertFromPixel({ xAxisIndex: 0 }, e.offsetX);
++        if (isFinite(p)) { play(false); if (live()) S.follow = false; seek(p); }
+       });
+     }
+     var C = {
+-      prob: css("--chart-s1") || "#1f6feb", xray: css("--chart-s2") || "#888", thr: css("--severity-strong") || "#d33",
+-      M: css("--severity-moderate") || "#e8902a", X: css("--severity-strong") || "#d33",
+-      C: css("--ink-faint") || "#999", grid: css("--grid") || "#ddd", ink: css("--ink-faint") || "#777",
++      prob: css("--chart-s1") || "#2a78d6", xray: css("--chart-s2") || "#eb6834", thr: css("--severity-strong") || "#b02f23",
++      evband: css("--severity-strong-soft") || "#fbdcd8", M: css("--severity-moderate") || "#a14e0e", X: css("--severity-strong") || "#b02f23",
++      grid: css("--grid") || "#ddd", line: css("--line") || "#ccc", ink: css("--ink-faint") || "#6b737c", fg: css("--ink") || "#16181b",
+     };
+     var data = [], prev = null;
+     S.all.forEach(function (f) {
+@@ -368,61 +478,60 @@
+       data.push([f.t, f.p]);
+       prev = f.t;
+     });
+-    var flareBands = S.flares.map(function (f) {
++    var bands = S.events.map(function (e) { return [{ xAxis: e.a - MIN, itemStyle: { color: C.evband, opacity: 0.85 } }, { xAxis: e.b + MIN }]; });
++    var marks = S.flares.filter(isMX).map(function (f) {
+       var L = letter(f["class"]);
+-      return [{ xAxis: f.a, yAxis: 1.04, itemStyle: { color: C[L] || C.C, opacity: L === "C" ? 0.45 : 0.9 },
+-        name: L === "C" ? "" : f["class"], label: { show: L !== "C", position: "top", color: C[L], fontSize: 11 } },
+-        { xAxis: f.b, yAxis: 1.12 }];
++      return { coord: [f.pk, classFlux(f["class"])], value: f["class"], itemStyle: { color: C[L] },
++        label: { show: true, position: "top", color: C[L], fontSize: 11, fontWeight: 600, fontFamily: "JetBrains Mono, monospace", formatter: "{c}" } };
+     });
+-    var eventBands = S.events.map(function (e) {
+-      return [{ xAxis: e.a, itemStyle: { color: C.thr, opacity: 0.12 } }, { xAxis: e.b + 2 * MIN }];
+-    });
+-    var hasX = S.xray.length > 0;
++    var font = { color: C.ink, fontSize: 11, fontFamily: "JetBrains Mono, monospace" };
++    var xBase = { type: "time", min: S.t0, max: S.t1, splitLine: { show: true, lineStyle: { color: C.grid } }, axisLine: { lineStyle: { color: C.line } }, axisTick: { show: false } };
+     S.chart.setOption({
+       animation: false,
+-      grid: { left: 36, right: hasX ? 34 : 16, top: 26, bottom: 28 },
+-      xAxis: {
+-        type: "time", min: S.t0, max: S.t1,
+-        axisLine: { lineStyle: { color: C.grid } }, splitLine: { show: false },
+-        axisLabel: { color: C.ink, fontSize: 11, hideOverlap: true,
+-          formatter: function (v) { var d = new Date(v); return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 ? dayLabel(v) : hm(v); } },
+-      },
+-      yAxis: [{
+-        type: "value", min: 0, max: 1.12, interval: 0.5,
+-        axisLabel: { color: C.ink, fontSize: 11, formatter: function (v) { return v > 1.01 ? "" : num(v, 1); } },
+-        splitLine: { lineStyle: { color: C.grid } },
+-      }, {
+-        type: "log", min: 1e-8, max: 1e-3, logBase: 10, show: hasX, splitLine: { show: false },
+-        axisLine: { show: false }, axisTick: { show: false },
+-        axisLabel: { color: C.xray, fontSize: 11, formatter: function (v) { return v >= 1e-3 ? "" : goesLetterOf(v * 1.0001); } },
+-      }],
++      grid: [{ left: 40, right: 30, top: 24, height: "42%" }, { left: 40, right: 30, top: "58%", bottom: 26 }],
++      xAxis: [
++        Object.assign({ gridIndex: 0, axisLabel: { show: false } }, xBase),
++        Object.assign({ gridIndex: 1, axisLabel: Object.assign({ hideOverlap: true, formatter: function (v) {
++          var d = new Date(v); return d.getUTCHours() === 0 && d.getUTCMinutes() === 0 ? dayLabel(v) : hm(v); } }, font) }, xBase),
++      ],
++      yAxis: [
++        { gridIndex: 0, type: "value", min: 0, max: 1, interval: 0.5, axisLabel: Object.assign({ formatter: function (v) { return num(v, 1); } }, font),
++          splitLine: { lineStyle: { color: C.grid } } },
++        { gridIndex: 1, type: "log", min: 1e-8, max: 1e-3, logBase: 10, splitLine: { lineStyle: { color: C.grid, type: "dotted" } },
++          axisLabel: Object.assign({ formatter: function (v) { return v >= 1e-3 ? "" : goesLetterOf(v * 1.0001); } }, font) },
++      ],
++      axisPointer: { link: [{ xAxisIndex: "all" }] },
+       tooltip: {
+         trigger: "axis", axisPointer: { type: "line" },
+         formatter: function (ps) {
+-          var p = ps.filter(function (x) { return x.seriesName === "p"; })[0];
++          var p = ps.filter(function (x) { return x.seriesName === "p"; })[0] || ps[0];
+           if (!p) return "";
+-          var g = goesAt(p.value[0]);
+-          return dt(p.value[0]) + " UT<br>" + (p.value[1] == null ? T.no_result : "p " + num(p.value[1], 2)) +
+-            (g ? "<br>GOES " + esc(g["class"]) : "");
++          var t = p.value[0], g = goesAt(t), x = xrayAt(t);
++          return dt(t) + " UT" + (p.seriesName === "p" ? "<br>" + (p.value[1] == null ? T.no_result : "p " + num(p.value[1], 2)) : "") +
++            (x ? "<br>GOES " + classOf(x[1]) : "") + (g ? "<br>" + T.flare_word + " " + esc(g["class"]) : "");
+         },
+       },
+-      dataZoom: [{ type: "inside", xAxisIndex: 0, filterMode: "none", minValueSpan: 30 * MIN }],
++      dataZoom: [{ type: "inside", xAxisIndex: [0, 1], filterMode: "none", minValueSpan: 30 * MIN }],
+       series: [
+-        { type: "line", name: "xray", yAxisIndex: 1, data: S.xray, showSymbol: false, silent: true,
+-          lineStyle: { color: C.xray, width: 1.2, opacity: 0.85 }, itemStyle: { color: C.xray } },
+-        { type: "line", name: "p", data: data, showSymbol: data.length < 400, symbolSize: 4, connectNulls: false,
+-          lineStyle: { color: C.prob, width: 1.6 }, itemStyle: { color: C.prob },
+-          markLine: { silent: true, symbol: "none", label: { show: false },
+-            lineStyle: { color: C.thr, type: "dashed", width: 1.5 }, data: [{ yAxis: S.thr }] },
+-          markArea: { silent: true, data: eventBands.concat(flareBands) } },
+-        { type: "line", name: "cursor", data: [], markLine: { silent: true, symbol: "none", label: { show: false },
+-          lineStyle: { color: css("--ink") || "#222", width: 1.5, type: "solid" }, data: [] } },
++        { type: "line", name: "xray", xAxisIndex: 1, yAxisIndex: 1, data: S.xray, showSymbol: false, silent: true, sampling: "lttb",
++          lineStyle: { color: C.xray, width: 1.6 }, itemStyle: { color: C.xray },
++          markArea: { silent: true, data: bands }, markPoint: { symbol: "circle", symbolSize: 5, silent: true, data: marks } },
++        { type: "line", name: "p", xAxisIndex: 0, yAxisIndex: 0, data: data, showSymbol: false, connectNulls: false, sampling: "lttb",
++          lineStyle: { color: C.prob, width: 1.8 }, itemStyle: { color: C.prob }, areaStyle: { color: C.prob, opacity: 0.1 },
++          markLine: { silent: true, symbol: "none", label: { show: true, position: "insideEndTop", formatter: T.alert + " " + num(S.thr, 2), color: C.thr, fontSize: 11 },
++            lineStyle: { color: C.thr, type: "dashed", width: 1.2 }, data: [{ yAxis: S.thr }] },
++          markArea: { silent: true, data: bands } },
++        { type: "line", name: "c0", xAxisIndex: 0, yAxisIndex: 0, data: [], markLine: { silent: true, symbol: "none",
++          label: { show: true, position: "end", color: C.fg, fontSize: 11, fontWeight: 600, fontFamily: "JetBrains Mono, monospace", formatter: function (m) { return hm(m.value); } },
++          lineStyle: { color: C.fg, width: 2, type: "solid" }, data: [] } },
++        { type: "line", name: "c1", xAxisIndex: 1, yAxisIndex: 1, data: [], markLine: { silent: true, symbol: "none", label: { show: false },
++          lineStyle: { color: C.fg, width: 2, type: "solid" }, data: [] } },
+       ],
+     }, true);
+   }
+   function moveCursor(t) {
+     if (!S.chart) return;
+-    S.chart.setOption({ series: [{}, {}, { markLine: { data: [{ xAxis: t }] } }] });
++    S.chart.setOption({ series: [{}, {}, { markLine: { data: [{ xAxis: t }] } }, { markLine: { data: [{ xAxis: t }] } }] });
+     var opt = S.chart.getOption(), dz = opt.dataZoom && opt.dataZoom[0];
+     if (dz && dz.startValue != null && (t < dz.startValue || t > dz.endValue)) {
+       var w = dz.endValue - dz.startValue;
+@@ -430,79 +539,165 @@
+     }
+   }
+ 
+-  // ---- lists ---------------------------------------------------------------
+-  function locText(loc) {
+-    if (!loc || !loc.centroid_arcsec) return "—";
+-    var c = loc.centroid_arcsec;
+-    return (c[0] >= 0 ? "+" : "") + Math.round(c[0]) + "″, " + (c[1] >= 0 ? "+" : "") + Math.round(c[1]) + "″";
+-  }
+-  function renderLists() {
+-    var rows = S.events.slice().reverse().map(function (e) {
+-      var g = null;
+-      S.flares.forEach(function (f) { if (!g && e.a <= f.b + 30 * MIN && e.b >= f.a - 10 * MIN) g = f; });
+-      var mins = Math.round((e.b - e.a) / MIN) + 2;
+-      return '<tr data-t="' + e.a + '" tabindex="0"><td>' + dt(e.a) + "</td><td>" + mins + " min</td><td>" + num(+e.p_max, 2) +
+-        "</td><td>" + (g ? '<span class="flare-cls flare-cls--' + letter(g["class"]) + '">' + esc(g["class"]) + "</span>"
+-          : '<span class="fx-miss">' + T.none_false_alarm + "</span>") + "</td><td>" + locText(e.location) + "</td></tr>";
++  // ---- the archive's period strip: max probability per bucket, the window as a frame ----
++  function drawMonth() {
++    if (live() || !S.ov.t0) return;
++    var N = 300, a = S.ov.t0, b = S.ov.t1, w = 1200 / N, mx = new Array(N);
++    S.ov.all.forEach(function (f) {
++      if (f.p == null) return;
++      var i = Math.min(N - 1, Math.max(0, Math.floor((f.t - a) / (b - a) * N)));
++      if (mx[i] === undefined || f.p > mx[i]) mx[i] = f.p;
++    });
++    var lo = "", hi = "";
++    for (var i = 0; i < N; i++) {
++      if (mx[i] === undefined) continue;
++      var h = Math.max(2, mx[i] * 40), x = (i * w).toFixed(1);
++      var d = "M" + x + " 44 V" + (44 - h).toFixed(1) + " h" + (w - 1).toFixed(1) + " V44 Z ";
++      if (mx[i] >= S.thr) hi += d; else lo += d;
++    }
++    var x0 = Math.max(0, (S.t0 - a) / (b - a) * 1200), x1 = Math.min(1200, (S.t1 - a) / (b - a) * 1200);
++    if (x1 - x0 < 6) { x0 = Math.max(0, (x0 + x1) / 2 - 3); x1 = x0 + 6; }
++    $("fx-month-svg").innerHTML =
++      '<rect x="0" y="0" width="1200" height="44" rx="6" fill="var(--band)"></rect>' +
++      '<path d="' + lo + '" fill="var(--chart-s1)" opacity=".55"></path>' +
++      '<path d="' + hi + '" fill="var(--severity-strong)"></path>' +
++      '<rect x="' + x0.toFixed(1) + '" y="1" width="' + (x1 - x0).toFixed(1) + '" height="42" rx="3" fill="none" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"></rect>';
++    var ticks = "";
++    for (var k = 0; k <= 4; k++) {
++      var t = a + (b - a) * (0.04 + k * 0.23);
++      ticks += '<span style="left:' + (4 + k * 23) + '%">' + (b - a > 3 * DAY ? dayLabel(t) : hm(t)) + "</span>";
++    }
++    $("fx-month-ticks").innerHTML = ticks;
++  }
++
++  // ---- the period: summary tiles and the list of flares and alerts ----------
++  function hitOf(f, list) {
++    for (var i = 0; i < list.length; i++) { var e = list[i]; if (e.a <= f.b + 5 * MIN && e.b >= f.a - 10 * MIN) return e; }
++    return null;
++  }
++  function flareNear(e) {
++    for (var i = 0; i < S.ov.flares.length; i++) { var f = S.ov.flares[i]; if (e.a <= f.b + 30 * MIN && e.b >= f.a - 10 * MIN) return f; }
++    return null;
++  }
++  function isOpen(e) {
++    var last = S.ov.events[S.ov.events.length - 1];
++    return live() && e === last && Date.now() - e.b < 12 * MIN;
++  }
++
++  function rows() {
++    var used = [], out = [];
++    S.ov.flares.filter(isMX).forEach(function (f) {
++      var e = hitOf(f, S.ov.events);
++      if (e) used.push(e);
++      var pmax = e ? +e.p_max : null;
++      if (!e) S.ov.all.forEach(function (x) { if (x.t >= f.a - 10 * MIN && x.t <= f.b + 5 * MIN && x.p != null && (pmax === null || x.p > pmax)) pmax = x.p; });
++      out.push({ t: f.a, go: e ? e.a : f.a - 10 * MIN, a: Math.min(f.a, e ? e.a : f.a), b: Math.max(f.b, e ? e.b : f.b), cls: f["class"],
++        alert: e ? hm(e.a) + " – " + (isOpen(e) ? "…" : hm(e.b)) : "—", p: pmax, loc: e ? locText(e.location, e.a) : "—",
++        res: e ? (isOpen(e) ? "open" : "hit") : "miss" });
+     });
+-    $("fx-evs").innerHTML = rows.join("") || '<tr><td colspan="5">' + T.no_events + "</td></tr>";
+-    var fl = S.flares.slice().reverse().map(function (f) {
+-      var L = letter(f["class"]), hit = null;
+-      S.events.forEach(function (e) { if (!hit && e.a <= f.b + 5 * MIN && e.b >= f.a - 10 * MIN) hit = e; });
+-      var res = hit ? '<span class="fx-hit">' + T.alert_at + " " + hm(hit.a) + "</span>"
+-        : L === "C" ? "—" : '<span class="fx-miss">' + T.not_detected + "</span>";
+-      return '<tr data-t="' + (f.a - 10 * MIN) + '" tabindex="0"><td><span class="flare-cls flare-cls--' + L + '">' + esc(f["class"]) +
+-        "</span></td><td>" + dt(f.a) + "</td><td>" + hm(f.pk) + "</td><td>" + res + "</td></tr>";
++    S.ov.events.forEach(function (e) {
++      if (used.indexOf(e) >= 0) return;
++      var g = flareNear(e);
++      out.push({ t: e.a, go: e.a, a: e.a, b: e.b, cls: g ? g["class"] : "", alert: hm(e.a) + " – " + (isOpen(e) ? "…" : hm(e.b)),
++        p: +e.p_max, loc: locText(e.location, e.a), res: isOpen(e) ? "open" : g ? "c" : "fa" });
++    });
++    return out.sort(function (x, y) { return y.t - x.t; });
++  }
++  var CHIP = { hit: ["hit", "r_hit"], miss: ["miss", "r_miss"], c: ["c", "r_c"], fa: ["fa", "r_fa"], open: ["open", "r_open"] };
++  function renderList() {
++    var html = rows().map(function (r) {
++      var c = CHIP[r.res];
++      return '<tr data-t="' + r.go + '" data-a="' + r.a + '" data-b="' + r.b + '" tabindex="0"><td>' + dt(r.t) + "</td><td>" +
++        (r.cls ? clsChip(r.cls) : "—") + "</td><td>" + r.alert + "</td><td>" + (r.p == null ? "—" : num(r.p, 2)) + "</td><td>" +
++        esc(r.loc) + '</td><td><span class="fx-chip fx-chip--' + c[0] + '">' + esc(T[c[1]]) + "</span></td></tr>";
+     });
+-    $("fx-fls").innerHTML = fl.join("") || '<tr><td colspan="4">' + T.no_flares + "</td></tr>";
+-    document.querySelectorAll("#fx-evs tr[data-t], #fx-fls tr[data-t]").forEach(function (tr) {
++    $("fx-rows").innerHTML = html.join("") || '<tr><td colspan="6">' + esc(T.no_events) + "</td></tr>";
++    document.querySelectorAll("#fx-rows tr[data-t]").forEach(function (tr) {
+       var go = function () {
+-        play(false); seek(+tr.dataset.t);
++        goTo(+tr.dataset.t);
+         window.scrollTo({ top: $("fx-state").getBoundingClientRect().top + window.scrollY - 100, behavior: "smooth" });
+       };
+       tr.addEventListener("click", go);
+       tr.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); });
+     });
++    if (S.frames[S.idx]) markRow(S.frames[S.idx].t);
++  }
++  function markRow(t) {
++    document.querySelectorAll("#fx-rows tr[data-a]").forEach(function (tr) {
++      tr.classList.toggle("cur", t >= +tr.dataset.a - 10 * MIN && t <= +tr.dataset.b + 10 * MIN);
++    });
++  }
++
++  function tile(k, v, s) {
++    return '<div class="fx-tile"><div class="fx-tile__k">' + esc(k) + '</div><div class="fx-tile__v">' + esc(v) +
++      '</div><div class="fx-tile__s">' + esc(s) + "</div></div>";
++  }
++  function renderSummary() {
++    var O = S.ov, days = (O.t1 - O.t0) / DAY;
++    var mx = O.flares.filter(isMX), hits = mx.filter(function (f) { return hitOf(f, O.events); });
++    var big = mx.filter(function (f) { return classFlux(f["class"]) >= 2e-5; });
++    var bigHits = big.filter(function (f) { return hitOf(f, O.events); });
++    var fa = O.events.filter(function (e) { return !flareNear(e); }).length;
++    var pm = null; O.all.forEach(function (x) { if (x.p != null && (!pm || x.p > pm.p)) pm = x; });
++    var ok = O.all.filter(function (x) { return x.status === "ok"; }).length;
++    var open = O.events.some(isOpen);
++    $("fx-sum-h").textContent = live() ? T.last24 : T.period + " " + dt(O.t0) + " → " + dt(O.t1) + " UT";
++    $("fx-sum-note").textContent = T.vs_swpc;
++    $("fx-tiles").innerHTML = [
++      tile(T.t_events, num(O.events.length, 0), open ? T.t_open : fill(T.t_days, { d: num(days, 1) })),
++      tile(T.t_mx, mx.length ? fill(T.of_n, { h: hits.length, n: mx.length }) : "—",
++        mx.length ? fill(T.t_mx_sub, { pct: Math.round(100 * hits.length / mx.length), h: bigHits.length, n: big.length }) : T.t_no_mx),
++      tile(T.t_pmax, pm ? num(pm.p, 2) : "—", pm ? dt(pm.t) + " UT" : ""),
++      tile(T.t_fa, num(fa, 0), fa && days >= 3 ? fill(T.t_fa_rate, { d: num(days / fa, 0) }) : T.t_fa_sub),
++      tile(T.t_cov, O.all.length ? num(100 * ok / O.all.length, 1) + " %" : "—", fill(T.t_cov_sub, { ok: num(ok, 0), n: num(O.all.length, 0) })),
++    ].join("");
+   }
+ 
+   // ---- wiring --------------------------------------------------------------
+   if ($("fx-src-vivo")) {
+-    $("fx-src-vivo").addEventListener("click", function () { play(false); setSrc("vivo"); S.follow = true; start(); });
+-    $("fx-src-archivo").addEventListener("click", function () { play(false); setSrc("archivo"); S.follow = false; start(); });
+-  }
+-  $("fx-now-btn").addEventListener("click", function () { play(false); S.follow = true; start(); });
+-  $("fx-load").addEventListener("click", function () { play(false); S.follow = false; load(); });
+-  $("fx-all").addEventListener("click", function () {
+-    if (!S.range || !S.range.first) return;
+-    var a = Date.parse(S.range.first), b = Date.parse(S.range.last), d = (b - a) / 86400e3;
+-    $("fx-start").value = iso(a).slice(0, 16);
+-    $("fx-span").value = d <= 0.25 ? "0.25" : d <= 1 ? "1" : d <= 3 ? "3" : d <= 7 ? "7" : "30";
+-    play(false); S.follow = false; load();
++    $("fx-src-vivo").addEventListener("click", function () { if (live()) return; setSrc("vivo"); S.follow = true; start(); });
++    $("fx-src-archivo").addEventListener("click", function () { if (!live()) return; setSrc("archivo"); S.follow = false; start(); });
++  }
++  $("fx-now-btn").addEventListener("click", function () { if (!live()) setSrc("vivo"); S.follow = true; start(); });
++  document.querySelectorAll("#fx-spans button").forEach(function (b) {
++    b.addEventListener("click", function () {
++      S.span = b.dataset.span; markSpan(); play(false);
++      var f = S.frames[S.idx];
++      if (live() && S.follow) { windowNow(); load(); }
++      else { windowAround(f ? f.t : S.t1); load(f ? f.slot : null); }
++    });
++  });
++  document.querySelectorAll("#fx-fps button").forEach(function (b) {
++    b.addEventListener("click", function () {
++      S.fps = +b.dataset.fps;
++      document.querySelectorAll("#fx-fps button").forEach(function (x) { x.classList.toggle("on", x === b); });
++    });
++  });
++  $("fx-month-svg").addEventListener("click", function (e) {
++    var r = e.currentTarget.getBoundingClientRect();
++    goTo(S.ov.t0 + (e.clientX - r.left) / r.width * (S.ov.t1 - S.ov.t0));
+   });
+-  $("fx-span").addEventListener("change", function () { if (S.src === "vivo" && S.follow) start(); });
+   $("fx-prev").addEventListener("click", function () { play(false); show(S.idx - 1); });
+   $("fx-next").addEventListener("click", function () { play(false); show(S.idx + 1); });
+   $("fx-play").addEventListener("click", function () { play(!S.playing); });
+-  $("fx-evprev").addEventListener("click", function () { play(false); jumpEvent(-1); });
+-  $("fx-evnext").addEventListener("click", function () { play(false); jumpEvent(1); });
+-  $("fx-scrub").addEventListener("input", function (e) { show(+e.target.value); });
+-  $("fx-okonly").addEventListener("change", function () {
+-    var t = S.frames[S.idx] ? S.frames[S.idx].t : S.t0; applyFilter(); seek(t, true);
+-  });
++  $("fx-evprev").addEventListener("click", function () { jumpEvent(-1); });
++  $("fx-evnext").addEventListener("click", function () { jumpEvent(1); });
+   $("fx-k-img").addEventListener("click", function (e) { e.preventDefault(); setKind("img"); });
+   $("fx-k-diff").addEventListener("click", function (e) { e.preventDefault(); setKind("diff"); });
+-  $("fx-disk-img").addEventListener("click", function () { S.disk = "img"; show(S.idx, true); });
+-  $("fx-disk-cam").addEventListener("click", function () { S.disk = "cam"; show(S.idx, true); });
++  ["img", "diff", "cam"].forEach(function (k) {
++    $("fx-disk-" + k).addEventListener("click", function () { S.disk = k; show(S.idx, true); });
++  });
+   window.addEventListener("keydown", function (e) {
+     var tag = e.target.tagName;
+-    if ((tag === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox") || tag === "SELECT") return;
++    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+     var f = S.frames[S.idx];
+-    if (e.key === "ArrowRight") { e.preventDefault(); play(false); if (e.shiftKey && f) seek(f.t + 60 * MIN); else show(S.idx + 1); }
+-    else if (e.key === "ArrowLeft") { e.preventDefault(); play(false); if (e.shiftKey && f) seek(f.t - 60 * MIN); else show(S.idx - 1); }
++    if (e.key === "ArrowRight") { e.preventDefault(); play(false); if (e.shiftKey && f) goTo(f.t + 60 * MIN); else show(S.idx + 1); }
++    else if (e.key === "ArrowLeft") { e.preventDefault(); play(false); if (e.shiftKey && f) goTo(f.t - 60 * MIN); else show(S.idx - 1); }
+     else if (e.key === " " && tag !== "BUTTON" && tag !== "A") { e.preventDefault(); play(!S.playing); }
+-    else if (e.key === "k" || e.key === "K") { play(false); jumpEvent(1); }
+-    else if (e.key === "j" || e.key === "J") { play(false); jumpEvent(-1); }
++    else if (e.key === "k" || e.key === "K") jumpEvent(1);
++    else if (e.key === "j" || e.key === "J") jumpEvent(-1);
+   });
++  S.clock = setInterval(function () { if (live()) srcLine(); }, 10e3);
+ 
+   init();
+ })();
+diff --git a/web/templates/web/product_detail_flare.html b/web/templates/web/product_detail_flare.html
+index 25a118c..b3121a4 100644
+--- a/web/templates/web/product_detail_flare.html
++++ b/web/templates/web/product_detail_flare.html
+@@ -2,175 +2,167 @@
+ {% load i18n l10n static %}
+ {% block title %}{{ title }}{% endblock %}
+ {% comment %}
+-  usach.flare.nrt's own page (model Centella, D-099/D-100/D-102). The first
+-  paint is server-rendered from what the portal stores (web/flare_page.py):
+-  state, latest images, 24 h chart (SVG), recent events. flare-page.js then
+-  turns it into the time-cursor view: it follows "now" (live, every 60 s),
+-  lets the reader go back through any period, and switches source between
+-  the live service and a replayed archive (FLARE_ARCHIVE_URL). Without JS the
+-  page reloads every 2 min.
++  usach.flare.nrt's own page (model Centella, D-099/D-100/D-102/D-103). The
++  first paint is server-rendered from what the portal stores
++  (web/flare_page.py): state, latest images, 24 h chart (SVG), recent events.
++  flare-page.js then turns it into the time-cursor view: it follows "now"
++  (live, every 60 s), lets the reader go back, and switches source between
++  the live service and a replayed archive (FLARE_ARCHIVE_URL). Layout from
++  the D-103 mockup: dark band with source and time, then state card + 131 Å
++  disk + 4 channels, timeline with transport, period summary, one list of
++  flares and alerts. Without JS the page reloads every 2 min.
+ {% endcomment %}
+ {% block extra_head %}<noscript><meta http-equiv="refresh" content="120"></noscript>{% endblock %}
+ {% block content %}
+-<div class="wrap flare-page fx" id="fx">
+-  <div class="crumb"><a href="{% url 'web:catalogue' %}">{% trans "Productos y modelos" %}</a> / {{ title }}</div>
+-  <div class="eyebrow">{% trans "Modelo Centella" %} · {{ product.id }}</div>
+-  <h1>{{ title }}</h1>
+-  <div class="badges">
+-    <span class="pill{% if status.status == 'ok' %} ok{% elif status.status == 'delayed' %} delayed{% endif %}"{% if status.title %} title="{{ status.title }}"{% endif %}><span class="dot" style="background:{{ status.color }}"></span>{{ status.label }}</span>
+-    <span class="pill">{{ product.get_maturity_display }}</span>
+-    <span class="pill">SDO/AIA · JSOC</span>
+-    <span class="pill" id="fx-range" hidden></span>
+-  </div>
+-
+-  <section class="fx-bar" id="fx-bar" aria-label="{% trans 'Fuente y período' %}" hidden>
+-    {% if fx_config.has_archive %}
+-    <div class="fx-field"><span>{% trans "Fuente" %}</span>
+-      <span class="seg" role="group" aria-label="{% trans 'Fuente' %}">
+-        <button type="button" class="seg-link on" id="fx-src-vivo">● {% trans "En vivo" %}</button>
+-        <button type="button" class="seg-link" id="fx-src-archivo">{% trans "Archivo (replay)" %}</button>
+-      </span></div>
+-    {% endif %}
+-    <label>{% trans "Desde (UT)" %} <input type="datetime-local" id="fx-start" step="120"></label>
+-    <label>{% trans "Ventana" %}
+-      <select id="fx-span">
+-        <option value="0.25">6 h</option><option value="1" selected>{% trans "1 día" %}</option>
+-        <option value="3">{% trans "3 días" %}</option><option value="7">{% trans "7 días" %}</option>
+-        <option value="30">{% trans "30 días" %}</option>
+-      </select>
+-    </label>
+-    <button type="button" class="fx-btn" id="fx-load">{% trans "Cargar" %}</button>
+-    <button type="button" class="fx-btn" id="fx-all">{% trans "Todo el período" %}</button>
+-    <button type="button" class="fx-btn fx-btn--now" id="fx-now-btn">● {% trans "Ahora" %}</button>
+-    <span class="fx-msg" id="fx-msg" role="status"></span>
+-  </section>
+-
+-  <section class="flare-hero" aria-label="{% trans 'Estado' %}">
+-    <div class="flare-now flare-now--{{ flare.state }}" id="fx-state" role="status">
+-      <div class="eyebrow" id="fx-state-eyebrow">{% if flare.state == "flare" %}{% trans "Ahora · evento abierto" %}{% else %}{% trans "Ahora" %}{% endif %}</div>
+-      <h2><span class="flare-dot" aria-hidden="true"></span><span id="fx-state-h">
+-        {% if flare.state == "flare" %}{% trans "Flare en curso" %}
+-        {% elif flare.state == "quiet" %}{% trans "Sin flare en curso" %}
+-        {% elif flare.state == "stale" %}{% trans "Datos con retraso" %}
+-        {% else %}{% trans "En preparación" %}{% endif %}</span>
+-      </h2>
+-      <div class="flare-meter" id="fx-meter"{% if flare.probability is None %} style="display: none"{% endif %}>
+-        <div class="flare-meter__head"><span>{% trans "Probabilidad del modelo" %}</span><b id="fx-p">{% if flare.probability is not None %}{{ flare.probability|floatformat:2 }}{% endif %}</b></div>
+-        <div class="flare-meter__bar"><span class="flare-meter__fill" id="fx-fill" style="width: {{ flare.probability_pct|unlocalize }}%"></span><span class="flare-meter__thr" id="fx-thr" style="left: {{ flare.threshold_pct|unlocalize }}%"></span></div>
+-        <div class="flare-meter__legend"><span>0</span><span id="fx-thr-label">{% blocktrans with t=flare.threshold|floatformat:2 %}umbral de alerta {{ t }}{% endblocktrans %}</span><span>1</span></div>
++<div class="fx" id="fx">
++  <section class="fx-band">
++    <div class="wrap">
++      <div class="crumb fx-crumb"><a href="{% url 'web:catalogue' %}">{% trans "Productos y modelos" %}</a> / {{ title }}</div>
++      <div class="fx-band__in">
++        <h1 class="fx-title">{% trans "Flares solares" %}</h1>
++        <div class="fx-band__side">
++          {% if fx_config.has_archive %}
++          <div class="seg fx-seg--dark fx-seg--big fx-js-only" role="group" aria-label="{% trans 'Fuente de datos' %}" hidden>
++            <button type="button" class="on" id="fx-src-vivo"><span class="fx-live-dot" aria-hidden="true"></span>{% trans "En vivo" %}</button>
++            <button type="button" id="fx-src-archivo">{% trans "Archivo (replay)" %}</button>
++          </div>
++          {% endif %}
++          <div class="fx-when">
++            <span class="fx-when__t" id="fx-now">{% if flare.observed %}{{ flare.observed|date:"d-M-Y · H:i" }} UT{% else %}—{% endif %}</span>
++            <span class="fx-when__src" id="fx-srcline"><span class="dot" style="background:{{ status.color }}" aria-hidden="true"></span> {{ status.label }}{% if flare.latency_min is not None %} · {% blocktrans with m=flare.latency_min %}imagen de hace {{ m }} min{% endblocktrans %}{% endif %}</span>
++          </div>
++        </div>
+       </div>
+-      {% if flare.probability is None %}<p id="fx-pending">{% trans "El detector todavía no ha entregado resultados en este ambiente." %}</p>{% endif %}
+-      <dl class="flare-facts">
+-        <div><dt>{% trans "Observación AIA" %}</dt><dd id="fx-obs">{% if flare.observed %}{{ flare.observed|date:"d-M H:i" }} UT{% else %}—{% endif %}</dd></div>
+-        <div><dt>{% trans "Retraso del dato" %}</dt><dd id="fx-lat">{% if flare.latency_min is not None %}{{ flare.latency_min }} min{% else %}—{% endif %}</dd></div>
+-        <div><dt>GOES</dt><dd id="fx-goes">—</dd></div>
+-      </dl>
+-      <p class="flare-note" id="fx-note">{% if flare.state == "flare" and flare.open_event %}{% blocktrans with t=flare.open_event.start|date:"H:i" %}Detectada desde las {{ t }} UT{% endblocktrans %}{% if flare.location %} · {{ flare.location }}{% endif %}. {% trans "La clase GOES se confirma al terminar la flare." %}{% elif flare.last_event %}{% trans "Último evento:" %} {% if flare.last_event.goes %}<b>{{ flare.last_event.goes }}</b>, {% endif %}{{ flare.last_event.start|date:"d-M H:i" }} UT{% if flare.last_event.location %}, {{ flare.last_event.location }}{% endif %}. <a href="#eventos">{% trans "Ver eventos" %} →</a>{% else %}{% trans "Compara cada imagen con las de 8 a 12 minutos antes." %}{% endif %}</p>
+     </div>
+-
+-    <figure class="flare-disk">
+-      <div class="flare-disk__head fx-disk-head"><span class="eyebrow" id="fx-disk-label">AIA 131 Å{% if flare.observed %} · {{ flare.observed|date:"H:i" }} UT{% endif %}</span>
+-        <span class="seg" role="group" id="fx-disk-seg" hidden><button type="button" class="seg-link on" id="fx-disk-img">131 Å</button><button type="button" class="seg-link" id="fx-disk-cam">Grad-CAM</button></span></div>
+-      <div class="flare-disk__img" id="fx-disk">
+-        <div class="fx-disk-holder"><img src="{% url 'web:flare_image' 131 %}" alt="{% trans 'Imagen más reciente del Sol en 131 Å' %}" width="512" height="512"></div>
+-        <span class="fx-box" id="fx-mark"{% if flare.marker %} style="left: {{ flare.marker.left|unlocalize }}%; top: {{ flare.marker.top|unlocalize }}%; width: {{ flare.marker.size|unlocalize }}%; height: {{ flare.marker.size|unlocalize }}%"{% else %} hidden{% endif %}></span>
+-      </div>
+-      <figcaption id="fx-disk-cap">{% trans "El recuadro marca la región de mayor aumento en 131 Å (ubicación de Centella). Norte arriba, oeste a la derecha." %}</figcaption>
+-    </figure>
+   </section>
+ 
+-  <section class="sec fx-timeline" aria-labelledby="flare-24-h">
+-    <div class="sec-head"><div><div class="eyebrow" id="fx-tl-eyebrow">{% trans "Últimas 24 horas" %}</div><h2 id="flare-24-h">{% trans "Probabilidad y flujo GOES" %}</h2></div></div>
+-    <figure class="flare-chart fx-chart">
+-      <div id="fx-chart">
+-      {% if flare.has_series %}
+-      <div class="flare-chart__plot">
+-        <svg viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="{% trans 'Probabilidad de Centella y flujo de rayos X de GOES en las últimas 24 horas' %}">
+-          <g class="flare-chart__grid"><line x1="0" y1="0" x2="1000" y2="0"></line><line x1="0" y1="100" x2="1000" y2="100"></line><line x1="0" y1="200" x2="1000" y2="200"></line><line x1="250" y1="0" x2="250" y2="200"></line><line x1="500" y1="0" x2="500" y2="200"></line><line x1="750" y1="0" x2="750" y2="200"></line></g>
+-          {% if flare.xray_path %}<path class="flare-chart__xray" d="{{ flare.xray_path }}"></path>{% endif %}
+-          <line class="flare-chart__thr" x1="0" y1="{{ flare.threshold_y|unlocalize }}" x2="1000" y2="{{ flare.threshold_y|unlocalize }}"></line>
+-          <path class="flare-chart__prob" d="{{ flare.prob_path }}"></path>
+-        </svg>
+-        <span class="flare-chart__y" style="top: -7px">1.0</span><span class="flare-chart__y" style="top: calc(50% - 7px)">0.5</span><span class="flare-chart__y" style="bottom: -7px">0</span>
+-        {% for l in flare.xray_levels %}<span class="flare-chart__cls" style="top: calc({{ l.top|unlocalize }}% - 7px)">{{ l.label }}</span>{% endfor %}
+-        {% for m in flare.event_marks %}<span class="flare-chart__ev" style="left: {{ m.left|unlocalize }}%">{{ m.label }}</span>{% endfor %}
++  <div class="wrap">
++    <section class="fx-hero" aria-label="{% trans 'Estado' %}">
++      <article class="fx-card fx-state fx-st--{{ flare.state_key }}" id="fx-state" role="status">
++        <div class="eyebrow fx-state__eyebrow" id="fx-state-eyebrow">{% trans "Ahora" %}{% if flare.state == "flare" and flare.open_event %} · {% blocktrans with t=flare.open_event.start|date:"H:i" %}evento desde {{ t }} UT{% endblocktrans %}{% endif %}</div>
++        <h2 class="fx-state__h"><span class="fx-state__dot" aria-hidden="true"></span><span id="fx-state-h">
++          {% if flare.state == "flare" %}{% trans "Flare en curso" %}
++          {% elif flare.state == "quiet" %}{% trans "Calma" %}
++          {% elif flare.state == "stale" %}{% trans "Sin datos recientes" %}
++          {% else %}{% trans "En preparación" %}{% endif %}</span></h2>
++        <ol class="fx-steps" id="fx-steps" aria-label="{% trans 'Ciclo de un evento' %}">
++          <li data-k="quiet"{% if flare.state == "quiet" %} class="on"{% endif %}>{% trans "Calma" %}</li>
++          <li data-k="onset">{% trans "Inicio" context "flare state" %}</li>
++          <li data-k="active"{% if flare.state == "flare" %} class="on"{% endif %}>{% trans "En curso" %}</li>
++          <li data-k="decay">{% trans "Decae" %}</li>
++        </ol>
++        <div class="fx-meter" id="fx-meter"{% if flare.probability is None %} style="display: none"{% endif %}>
++          <div class="fx-meter__head"><span>{% trans "Probabilidad de flare M/X" %}</span><b id="fx-p">{% if flare.probability is not None %}{{ flare.probability|floatformat:2 }}{% endif %}</b></div>
++          <div class="fx-meter__bar"><span class="fx-meter__fill" id="fx-fill" style="width: {{ flare.probability_pct|unlocalize }}%"></span><span class="fx-meter__thr" id="fx-thr" style="left: {{ flare.threshold_pct|unlocalize }}%"></span></div>
++          <div class="fx-meter__legend"><span>0</span><span id="fx-thr-label">{% blocktrans with t=flare.threshold|floatformat:2 %}alerta {{ t }}{% endblocktrans %}</span><span>1</span></div>
++          <svg class="fx-spark fx-js-only" id="fx-spark" viewBox="0 0 300 40" preserveAspectRatio="none" role="img" aria-label="{% trans 'Probabilidad en la última hora' %}" hidden>
++            <path class="fx-spark__thr" d="M0 8 H300"></path><path class="fx-spark__area" id="fx-spark-a" d=""></path><path class="fx-spark__line" id="fx-spark-l" d=""></path>
++          </svg>
++          <div class="fx-spark__cap fx-js-only" hidden>{% trans "Última hora" %}</div>
++        </div>
++        {% if flare.probability is None %}<p id="fx-pending">{% trans "El detector todavía no ha entregado resultados en este ambiente." %}</p>{% endif %}
++        <dl class="fx-facts">
++          <div><dt>{% trans "Imagen AIA" %}</dt><dd id="fx-obs">{% if flare.observed %}{{ flare.observed|date:"d-M H:i" }} UT{% else %}—{% endif %}</dd></div>
++          <div><dt>{% trans "GOES rayos X" %}</dt><dd id="fx-goes">{% if flare.goes_now %}<span class="fx-cls fx-cls--{{ flare.goes_now|slice:':1' }}">{{ flare.goes_now }}</span>{% else %}—{% endif %}</dd></div>
++          <div class="fx-facts__wide"><dt>{% trans "Ubicación" %}</dt><dd id="fx-loc">{{ flare.location|default:"—" }}</dd></div>
++        </dl>
++        <p class="fx-note" id="fx-note">{% if flare.state == "flare" and flare.open_event %}{% blocktrans with t=flare.open_event.start|date:"H:i" %}Detectada desde las {{ t }} UT{% endblocktrans %}. {% trans "La clase GOES se confirma al terminar la flare." %}{% elif flare.last_event %}{% trans "Último evento:" %} {% if flare.last_event.goes %}<b>{{ flare.last_event.goes }}</b>, {% endif %}{{ flare.last_event.start|date:"d-M H:i" }} UT. <a href="#eventos">{% trans "Ver la lista" %} →</a>{% else %}{% trans "Compara cada imagen con las de 8 a 12 minutos antes." %}{% endif %}</p>
++      </article>
++
++      <figure class="fx-panel fx-disk">
++        <div class="fx-panel__head"><span class="eyebrow" id="fx-disk-label">AIA 131 Å{% if flare.observed %} · {{ flare.observed|date:"H:i" }} UT{% endif %}</span>
++          <span class="seg fx-seg--dark fx-js-only" role="group" aria-label="{% trans 'Vista del disco' %}" hidden><button type="button" class="on" id="fx-disk-img">131 Å</button><button type="button" id="fx-disk-diff">{% trans "Diferencia" %}</button><button type="button" id="fx-disk-cam">Grad-CAM</button></span></div>
++        <div class="fx-disk__img" id="fx-disk">
++          <div class="fx-disk-holder"><img src="{% url 'web:flare_image' 131 %}" alt="{% trans 'Imagen más reciente del Sol en 131 Å' %}" width="512" height="512"></div>
++          <span class="fx-box" id="fx-mark" data-label="{{ flare.box_label }}"{% if flare.marker %} style="left: {{ flare.marker.left|unlocalize }}%; top: {{ flare.marker.top|unlocalize }}%; width: {{ flare.marker.size|unlocalize }}%; height: {{ flare.marker.size|unlocalize }}%"{% else %} hidden{% endif %}></span>
++        </div>
++        <figcaption class="fx-sr">{% trans "Norte arriba, oeste a la derecha. El recuadro marca la región que más subió en 131 Å." %}</figcaption>
++      </figure>
++
++      <section class="fx-panel fx-chs" aria-labelledby="fx-chs-h">
++        <div class="fx-panel__head"><h2 class="eyebrow" id="fx-chs-h">{% trans "4 canales" %}</h2>
++          <div class="seg fx-seg--dark" role="group" aria-label="{% trans 'Imagen o diferencia' %}">
++            <a class="seg-link{% if flare.view == 'img' %} on{% endif %}" id="fx-k-img" href="?vista=imagen" {% if flare.view == 'img' %}aria-current="true"{% endif %}>{% trans "Imagen" %}</a>
++            <a class="seg-link{% if flare.view == 'diff' %} on{% endif %}" id="fx-k-diff" href="?vista=diferencia" {% if flare.view == 'diff' %}aria-current="true"{% endif %}>{% trans "Diferencia" %}</a>
++          </div></div>
++        <div class="fx-chs__grid">
++          {% for ch in flare.channels %}
++          <figure class="fx-ch" data-wave="{{ ch.wave }}" title="{{ ch.ion }} · {{ ch.what }}">
++            <div class="fx-ch-img"><div class="fx-ch-pic"><img src="{% url 'web:flare_image' ch.wave %}{% if flare.view == 'diff' %}?tipo=diferencia{% endif %}" alt="{% blocktrans with w=ch.wave %}AIA {{ w }} Å{% endblocktrans %}" width="512" height="512" loading="lazy"></div><span class="fx-box fx-box--ch"{% if flare.marker %} style="left: {{ flare.marker.left|unlocalize }}%; top: {{ flare.marker.top|unlocalize }}%; width: {{ flare.marker.size|unlocalize }}%; height: {{ flare.marker.size|unlocalize }}%"{% else %} hidden{% endif %}></span></div>
++            <figcaption>{{ ch.wave }} Å</figcaption>
++          </figure>
++          {% endfor %}
++        </div>
++      </section>
++    </section>
++
++    <section class="fx-card fx-tl" aria-labelledby="fx-tl-h">
++      <div class="fx-tl__head">
++        <div class="fx-tl__title">
++          <h2 id="fx-tl-h">{% trans "Línea de tiempo" %}</h2>
++          <span class="fx-legend"><i class="fx-sw fx-sw--p"></i>{% trans "Probabilidad Centella" %}</span>
++          <span class="fx-legend"><i class="fx-sw fx-sw--x"></i>GOES</span>
++          <span class="fx-legend fx-js-only" hidden><i class="fx-sw fx-sw--ev"></i>{% trans "Evento Centella" %}</span>
++        </div>
++        <div class="seg fx-js-only" role="group" aria-label="{% trans 'Ventana' %}" id="fx-spans" hidden>
++          <button type="button" data-span="0.25">6 h</button><button type="button" data-span="1" class="on">24 h</button><button type="button" data-span="3">3 d</button><button type="button" data-span="7">7 d</button><button type="button" data-span="all" id="fx-span-all" hidden>{% trans "Todo" %}</button>
++        </div>
+       </div>
+-      <div class="flare-chart__x">{% for t in flare.ticks %}<span>{{ t.label }}</span>{% endfor %}</div>
+-      {% else %}
+-      <p>{% trans "Todavía no hay resultados en las últimas 24 horas." %}</p>
+-      {% endif %}
++      <div id="fx-chart" class="fx-chart">
++        {% if flare.has_series %}
++        <div class="flare-chart__plot">
++          <svg viewBox="0 0 1000 200" preserveAspectRatio="none" role="img" aria-label="{% trans 'Probabilidad de Centella y flujo de rayos X de GOES en las últimas 24 horas' %}">
++            <g class="flare-chart__grid"><line x1="0" y1="0" x2="1000" y2="0"></line><line x1="0" y1="100" x2="1000" y2="100"></line><line x1="0" y1="200" x2="1000" y2="200"></line><line x1="250" y1="0" x2="250" y2="200"></line><line x1="500" y1="0" x2="500" y2="200"></line><line x1="750" y1="0" x2="750" y2="200"></line></g>
++            {% if flare.xray_path %}<path class="flare-chart__xray" d="{{ flare.xray_path }}"></path>{% endif %}
++            <line class="flare-chart__thr" x1="0" y1="{{ flare.threshold_y|unlocalize }}" x2="1000" y2="{{ flare.threshold_y|unlocalize }}"></line>
++            <path class="flare-chart__prob" d="{{ flare.prob_path }}"></path>
++          </svg>
++          <span class="flare-chart__y" style="top: -7px">1.0</span><span class="flare-chart__y" style="top: calc(50% - 7px)">0.5</span><span class="flare-chart__y" style="bottom: -7px">0</span>
++          {% for l in flare.xray_levels %}<span class="flare-chart__cls" style="top: calc({{ l.top|unlocalize }}% - 7px)">{{ l.label }}</span>{% endfor %}
++          {% for m in flare.event_marks %}<span class="flare-chart__ev" style="left: {{ m.left|unlocalize }}%">{{ m.label }}</span>{% endfor %}
++        </div>
++        <div class="flare-chart__x">{% for t in flare.ticks %}<span>{{ t.label }}</span>{% endfor %}</div>
++        {% else %}
++        <p>{% trans "Todavía no hay resultados en las últimas 24 horas." %}</p>
++        {% endif %}
+       </div>
+-      <figcaption class="flare-chart__legend">
+-        <span><i class="k-prob"></i>{% trans "Probabilidad (Centella)" %}</span>
+-        <span><i class="k-xray"></i>{% trans "GOES rayos X 0,1–0,8 nm (escala A–X a la derecha)" %}</span>
+-        <span><i class="k-thr"></i>{% trans "Umbral de alerta" %}</span>
+-        <span class="fx-js-only" hidden><i class="fx-k fx-k--ev"></i>{% trans "Evento Centella" %}</span>
+-        <span class="fx-js-only" hidden><i class="fx-k fx-k--m"></i>{% trans "Flares GOES M / X" %}</span>
+-        <span class="fx-js-only" hidden>{% trans "Rueda: zoom · arrastrar: mover · clic: ir a ese instante" %}</span>
+-      </figcaption>
+-      <div class="fx-transport" id="fx-transport" hidden>
+-        <b class="fx-now" id="fx-now">—</b>
+-        <button type="button" class="fx-btn" id="fx-evprev" title="{% trans 'Evento o flare anterior (J)' %}">⏮</button>
+-        <button type="button" class="fx-btn" id="fx-prev" title="{% trans 'Instante anterior (←)' %}">◀</button>
+-        <button type="button" class="fx-btn fx-btn--play" id="fx-play" title="{% trans 'Reproducir (espacio)' %}">▶</button>
+-        <button type="button" class="fx-btn" id="fx-next" title="{% trans 'Instante siguiente (→)' %}">▶▏</button>
+-        <button type="button" class="fx-btn" id="fx-evnext" title="{% trans 'Evento o flare siguiente (K)' %}">⏭</button>
+-        <select id="fx-fps" aria-label="{% trans 'Velocidad' %}"><option value="1">1 fps</option><option value="2" selected>2 fps</option><option value="4">4 fps</option></select>
+-        <input type="range" id="fx-scrub" min="0" max="0" value="0" aria-label="{% trans 'Instante' %}">
+-        <label class="fx-check"><input type="checkbox" id="fx-okonly"> {% trans "solo instantes con resultado" %}</label>
++      <div class="fx-month fx-js-only" id="fx-month" hidden>
++        <div class="fx-month__cap">{% trans "Todo el período · clic para llevar la ventana ahí" %}</div>
++        <div class="fx-month__plot"><svg id="fx-month-svg" viewBox="0 0 1200 44" preserveAspectRatio="none" role="img" aria-label="{% trans 'Probabilidad máxima en todo el período' %}"></svg><div class="fx-month__ticks" id="fx-month-ticks"></div></div>
+       </div>
+-    </figure>
+-  </section>
+-
+-  <section class="sec" aria-labelledby="flare-sun-h">
+-    <div class="sec-head">
+-      <div><div class="eyebrow" id="fx-sun-eyebrow">AIA{% if flare.observed %} · {{ flare.observed|date:"d-M H:i" }} UT{% endif %}</div><h2 id="flare-sun-h">{% trans "El Sol en los 4 canales" %}</h2></div>
+-      <div class="seg" role="group" aria-label="{% trans 'Qué mostrar' %}">
+-        <a class="seg-link{% if flare.view == 'img' %} on{% endif %}" id="fx-k-img" href="?vista=imagen" {% if flare.view == 'img' %}aria-current="true"{% endif %}>{% trans "Imagen" %}</a>
+-        <a class="seg-link{% if flare.view == 'diff' %} on{% endif %}" id="fx-k-diff" href="?vista=diferencia" {% if flare.view == 'diff' %}aria-current="true"{% endif %}>{% trans "Diferencia (lo que ve el modelo)" %}</a>
++      <div class="fx-transport fx-js-only" id="fx-transport" hidden>
++        <button type="button" class="fx-btn" id="fx-evprev" aria-label="{% trans 'Evento anterior' %}" title="{% trans 'Evento anterior (J)' %}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M18 6l-8 6 8 6z"></path></svg></button>
++        <button type="button" class="fx-btn" id="fx-prev" aria-label="{% trans 'Imagen anterior' %}" title="{% trans 'Imagen anterior (←)' %}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg></button>
++        <button type="button" class="fx-btn fx-btn--play" id="fx-play" aria-label="{% trans 'Reproducir' %}" title="{% trans 'Reproducir (espacio)' %}"><svg class="fx-i-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l11 7-11 7z"></path></svg><svg class="fx-i-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"></path></svg></button>
++        <button type="button" class="fx-btn" id="fx-next" aria-label="{% trans 'Imagen siguiente' %}" title="{% trans 'Imagen siguiente (→)' %}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
++        <button type="button" class="fx-btn" id="fx-evnext" aria-label="{% trans 'Evento siguiente' %}" title="{% trans 'Evento siguiente (K)' %}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 6l8 6-8 6z"></path></svg></button>
++        <span class="seg" role="group" aria-label="{% trans 'Velocidad' %}" id="fx-fps"><button type="button" data-fps="2" class="on">1×</button><button type="button" data-fps="4">2×</button><button type="button" data-fps="8">4×</button></span>
++        <span class="fx-pos" id="fx-pos"></span>
++        <span class="fx-msg" id="fx-msg" role="status"></span>
++        <button type="button" class="fx-btn fx-btn--now on" id="fx-now-btn"><span class="fx-now-dot" aria-hidden="true"></span><span id="fx-now-label">{% trans "Ahora" %}</span></button>
+       </div>
+-    </div>
+-    <div class="flare-channels">
+-      {% for ch in flare.channels %}
+-      <figure class="flare-ch" data-wave="{{ ch.wave }}">
+-        <div class="flare-ch__name">{{ ch.wave }} Å</div>
+-        <div class="fx-ch-img"><div class="fx-ch-pic"><img src="{% url 'web:flare_image' ch.wave %}{% if flare.view == 'diff' %}?tipo=diferencia{% endif %}" alt="{% blocktrans with w=ch.wave %}AIA {{ w }} Å{% endblocktrans %}" width="512" height="512" loading="lazy"></div><span class="fx-box fx-box--ch"{% if flare.marker %} style="left: {{ flare.marker.left|unlocalize }}%; top: {{ flare.marker.top|unlocalize }}%; width: {{ flare.marker.size|unlocalize }}%; height: {{ flare.marker.size|unlocalize }}%"{% else %} hidden{% endif %}></span></div>
+-        <figcaption><b>{{ ch.ion }}</b><span>{{ ch.what }}</span><span class="fx-tobs"></span></figcaption>
+-      </figure>
+-      {% endfor %}
+-    </div>
+-    <p class="flare-help" id="fx-help">{% if flare.view == 'diff' %}{% trans "Diferencia: la imagen actual menos el promedio de las de 8, 10 y 12 minutos antes, en cuentas por segundo. Lo que se ilumina aquí es lo que Centella evalúa." %}{% else %}{% trans "Imágenes synoptic de AIA, cada 2 minutos. Centella usa los cuatro canales a la vez." %}{% endif %}</p>
+-  </section>
++      <p class="fx-keys fx-js-only" hidden>{% trans "Teclado: ← → una imagen, Shift + ← → una hora, espacio reproduce, J / K salta entre eventos. Clic en el gráfico mueve el cursor." %}</p>
++    </section>
+ 
+-  <div class="fx-lists" id="eventos">
+-    <section class="sec" aria-labelledby="flare-ev-h">
+-      <div class="sec-head"><div><div class="eyebrow">{% trans "Detecciones" %}</div><h2 id="flare-ev-h">{% trans "Eventos de Centella" %}</h2></div></div>
+-      <div class="table-wrap flare-table"><table>
+-        <thead><tr><th scope="col">{% trans "Inicio (UT)" %}</th><th scope="col">{% trans "Duración" %}</th><th scope="col">{% trans "Prob. máx." %}</th><th scope="col">{% trans "Clase GOES" %}</th><th scope="col">{% trans "Ubicación" %}</th></tr></thead>
+-        <tbody id="fx-evs">
++    <section class="fx-card fx-sum fx-js-only" aria-labelledby="fx-sum-h" hidden>
++      <div class="fx-sum__head"><h2 id="fx-sum-h">{% trans "Últimas 24 horas" %}</h2><span id="fx-sum-note"></span></div>
++      <div class="fx-sum__tiles" id="fx-tiles"></div>
++    </section>
++
++    <section class="fx-card fx-list" id="eventos" aria-labelledby="fx-list-h">
++      <div class="fx-list__head"><h2 id="fx-list-h">{% trans "Flares y alertas" %}</h2></div>
++      <div class="fx-list__scroll"><table class="fx-tbl">
++        <thead><tr><th scope="col">{% trans "Hora (UT)" %}</th><th scope="col">GOES</th><th scope="col">{% trans "Alerta Centella" %}</th><th scope="col">{% trans "Prob. máx." %}</th><th scope="col">{% trans "Ubicación" %}</th><th scope="col">{% trans "Resultado" %}</th></tr></thead>
++        <tbody id="fx-rows">
+           {% for e in flare.events %}
+-          <tr><td>{{ e.start|date:"d-M H:i" }}</td><td>{{ e.minutes }} min</td><td>{{ e.p_max|floatformat:2 }}</td><td>{% if e.goes %}<span class="flare-cls flare-cls--{{ e.goes_level }}">{{ e.goes }}</span>{% else %}—{% endif %}</td><td>{{ e.location|default:"—" }}</td></tr>
++          <tr><td>{{ e.start|date:"d-M H:i" }}</td><td>{% if e.goes %}<span class="fx-cls fx-cls--{{ e.goes_level }}">{{ e.goes }}</span>{% else %}—{% endif %}</td><td>{{ e.start|date:"H:i" }} · {{ e.minutes }} min</td><td>{{ e.p_max|floatformat:2 }}</td><td>{{ e.location|default:"—" }}</td><td>{% if e.goes_level == "M" or e.goes_level == "X" %}<span class="fx-chip fx-chip--hit">{% trans "Detectada" %}</span>{% elif e.goes %}<span class="fx-chip fx-chip--c">{% trans "Alerta en flare C" %}</span>{% else %}<span class="fx-chip fx-chip--fa">{% trans "Sin flare GOES" %}</span>{% endif %}</td></tr>
+           {% empty %}
+-          <tr><td colspan="5">{% trans "Sin eventos en los últimos 7 días." %}</td></tr>
++          <tr><td colspan="6">{% trans "Sin eventos en los últimos 7 días." %}</td></tr>
+           {% endfor %}
+         </tbody>
+       </table></div>
+     </section>
+-    <section class="sec fx-js-only" aria-labelledby="fx-fl-h" hidden>
+-      <div class="sec-head"><div><div class="eyebrow">GOES</div><h2 id="fx-fl-h">{% trans "Flares registradas (C o mayor)" %}</h2></div></div>
+-      <div class="table-wrap flare-table"><table>
+-        <thead><tr><th scope="col">{% trans "Clase" %}</th><th scope="col">{% trans "Inicio (UT)" %}</th><th scope="col">{% trans "Pico" %}</th><th scope="col">Centella</th></tr></thead>
+-        <tbody id="fx-fls"></tbody>
+-      </table></div>
+-    </section>
+   </div>
+-  <p class="flare-help fx-js-only" hidden>{% trans "Una flare M o X cuenta como detectada si hay una alerta entre 10 minutos antes de su inicio y 5 minutos después de su fin. Un evento sin flare GOES (C o mayor) cerca es una falsa alarma." %} {% trans "Teclas: ← → un instante, Shift + ← → una hora, espacio reproduce, J / K salta entre eventos." %}</p>
+-
+-  <section class="sec flare-about">
+-    <div><div class="eyebrow">{% trans "Cómo leerlo" %}</div><h3>{% trans "Qué detecta" %}</h3><p>{% trans "Un ensemble de 5 redes neuronales compara cada imagen de AIA (131, 171, 304 y 1600 Å) con las de 8 a 12 minutos antes. Sobre 0,80, Centella abre un evento." %}</p></div>
+-    <div><div class="eyebrow">{% trans "Desempeño" %}</div><h3>{% trans "Validado contra GOES" %}</h3><p>{% trans "Junio–julio 2026: detectó todas las flares M2 o mayores (22/22) y el 72 % de las M/X, con 3 falsas alarmas en 28 días. La alerta llega típicamente 1 min antes del pico de rayos X." %}</p></div>
+-    <div><div class="eyebrow">{% trans "Límites" %}</div><h3>{% trans "Lo que no hace" %}</h3><p>{% trans "No anticipa flares: confirma con imágenes lo que GOES ya empieza a ver y dice dónde ocurre. Pierde M1 pequeñas cuando hay muchas seguidas. Producto en beta." %}</p></div>
+-  </section>
+ </div>
+ {{ fx_config|json_script:"fx-config" }}
+ {% endblock %}
+diff --git a/web/tests/test_flare_page.py b/web/tests/test_flare_page.py
+index a55895a..a3ba984 100644
+--- a/web/tests/test_flare_page.py
++++ b/web/tests/test_flare_page.py
+@@ -63,7 +63,8 @@ def test_quiet_page_shows_state_channels_chart_and_events(client):
+     _fixture_day()
+     body = client.get(reverse("web:product_detail", args=[PID])).content.decode()
+     state = re.search(r'id="fx-state-h">(.*?)</span>', body, re.S).group(1)
+-    assert "Sin flare en curso" in state and "Flare en curso" not in state
++    assert "Calma" in state and "Flare en curso" not in state
++    assert "fx-st--quiet" in body and "Flares solares" in body
+     assert "0,10" in body and "12 min" in body                    # probability (es decimal comma), latency
+     for w in (131, 171, 304, 1600):
+         assert reverse("web:flare_image", args=[w]) in body
+@@ -81,7 +82,7 @@ def test_open_event_reads_as_flare_in_progress(client):
+     _fixture_day(open_event=True)
+     body = client.get(reverse("web:product_detail", args=[PID])).content.decode()
+     assert "Flare en curso" in re.search(r'id="fx-state-h">(.*?)</span>', body, re.S).group(1)
+-    assert "flare-now--flare" in body
++    assert "fx-st--active" in body
+     assert "Detectada desde las" in re.search(r'id="fx-note">(.*?)</p>', body, re.S).group(1)
+ 
+ 
+@@ -164,7 +165,7 @@ def test_page_offers_the_archive_when_configured(client, monkeypatch):
+     body = client.get(reverse("web:product_detail", args=[PID])).content.decode()
+     assert '"has_archive": true' in body and 'id="fx-src-archivo"' in body
+     en = client.get("/en" + reverse("web:product_detail", args=[PID])).content.decode()
+-    assert "Archive (replay)" in en and "Back to now" in en
++    assert "Archive (replay)" in en and "Back to live" in en and "Solar flares" in en
+ 
+ 
+ def test_old_explorar_url_redirects_to_the_page():
+@@ -266,4 +267,14 @@ def test_page_draws_the_box_on_the_disk_and_the_channels(client):
+     body = client.get(reverse("web:product_detail", args=[PID])).content.decode()
+     assert body.count('class="fx-box') == 5                      # disk + 4 channels
+     assert len(re.findall(r'class="fx-box[^>]*style="left: [\d.]+%; top: [\d.]+%; width: [\d.]+%', body)) == 5
+-    assert re.search(r'class="fx-box" id="fx-mark" style="left: [\d.]+%; top: [\d.]+%; width: [\d.]+%', body)
++    assert re.search(r'class="fx-box" id="fx-mark" data-label="[^"]+" style="left: [\d.]+%; top: [\d.]+%; width: [\d.]+%', body)
++
++
++def test_heliographic_follows_b0_and_leaves_the_disk_empty():
++    import datetime as dt
++
++    utc = dt.UTC
++    assert flare_page.heliographic(0, 0, dt.datetime(2026, 9, 8, tzinfo=utc)) == "N07 W00"    # B0 ≈ +7.2° in September
++    assert flare_page.heliographic(0, 0, dt.datetime(2026, 3, 6, tzinfo=utc)) == "S07 W00"    # and ≈ −7.2° in March
++    assert flare_page.heliographic(-340, -130, dt.datetime(2026, 6, 25, tzinfo=utc)) == "S06 E21"
++    assert flare_page.heliographic(990, 0, dt.datetime(2026, 11, 4, tzinfo=utc)) == ""         # off the disk
+diff --git a/web/views.py b/web/views.py
+index 2870a4e..1ac15c3 100644
+--- a/web/views.py
++++ b/web/views.py
+@@ -633,36 +633,44 @@ def _flare_fx_config(lang: str) -> dict:
+ 
+ 
+ def _flare_i18n() -> dict:
+-    """The flare page's JS strings, in the active language."""
++    """The flare page's JS strings, in the active language (D-103)."""
+     return {
+-        "flare": gettext("Flare en curso"), "quiet": gettext("Sin flare en curso"),
+-        "no_result": gettext("Sin resultado"), "at": gettext("En ese instante"),
+-        "event_open": gettext("Evento abierto"),
+-        "threshold": gettext("umbral de alerta"), "of": gettext("de"),
+-        "frames_before": gettext("frames 8–12 min antes"),
++        "now": gettext("Ahora"), "at": gettext("En ese instante"), "event_since": gettext("evento desde"),
++        "st_quiet": gettext("Calma"), "st_onset": gettext("Inicio de flare"), "st_active": gettext("Flare en curso"),
++        "st_decay": gettext("Decaimiento"), "st_none": gettext("Sin resultado"), "st_stale": gettext("Sin datos recientes"),
++        "alert": gettext("alerta"), "alert_since": gettext("Alerta desde las"),
++        "decay_note": gettext("Bajó del umbral; el evento se cierra si no vuelve a subir en 10 minutos."),
++        "stale_note": gettext("La imagen más nueva es de hace {m} min; se muestra el último resultado."),
++        "compared": gettext("Comparada con {n} de {of} imágenes de 8–12 min antes."),
+         "status_missing": gettext("Faltan canales de AIA en este instante"),
+         "status_qc_reject": gettext("Imágenes rechazadas por el control de calidad"),
+         "status_no_baseline": gettext("Faltan las imágenes de comparación (8–12 min antes)"),
+         "status_inputs_old": gettext("Datos demasiado atrasados para usarse"),
++        "peak": gettext("pico"), "flux_now": gettext("flujo en ese instante"), "flare_word": gettext("flare"),
++        "limb_w": gettext("limbo O"), "limb_e": gettext("limbo E"),
+         "no_image": gettext("Sin imagen para este instante"),
+         "no_diff": gettext("Sin diferencia: faltan las imágenes de comparación"),
+         "no_gradcam": gettext("Grad-CAM solo para instantes en alerta"),
+-        "detected_since": gettext("Detectada desde las"),
+-        "location": gettext("ubicación"), "peak": gettext("pico"),
+-        "no_events": gettext("Sin eventos de Centella en este período."),
+-        "no_flares": gettext("Sin flares GOES C o mayores en este período."),
+-        "none_false_alarm": gettext("ninguna (falsa alarma)"),
+-        "alert_at": gettext("alerta"), "not_detected": gettext("no detectada"),
+-        "data": gettext("datos"), "days": gettext("días"), "no_data": gettext("Sin resultados todavía"),
++        "disk_diff": gettext("Diferencia 131 Å"), "disk_cam": gettext("131 Å + Grad-CAM"),
++        "updated": gettext("Actualizado hace {s} s"), "image_ago": gettext("imagen de hace {m} min"),
++        "archive_src": gettext("Archivo de evaluación"), "back_live": gettext("Volver a en vivo"),
++        "play": gettext("Reproducir"), "pause": gettext("Pausar"),
++        "pos": gettext("imagen {i} de {n}"), "latest": gettext("última imagen"),
++        "last24": gettext("Últimas 24 horas"), "period": gettext("Período"),
++        "vs_swpc": gettext("Comparado con la lista de flares GOES (SWPC)"),
++        "t_events": gettext("Eventos Centella"), "t_open": gettext("1 abierto ahora"), "t_days": gettext("en {d} días"),
++        "t_mx": gettext("Flares M/X detectadas"), "of_n": gettext("{h} de {n}"),
++        "t_mx_sub": gettext("{pct} % · desde M2: {h} de {n}"), "t_no_mx": gettext("ninguna M/X en el período"),
++        "t_pmax": gettext("Probabilidad máxima"),
++        "t_fa": gettext("Falsas alarmas"), "t_fa_sub": gettext("alerta sin flare C o mayor"),
++        "t_fa_rate": gettext("≈ 1 cada {d} días"),
++        "t_cov": gettext("Cobertura"), "t_cov_sub": gettext("{ok} de {n} imágenes con resultado"),
++        "r_hit": gettext("Detectada"), "r_miss": gettext("No detectada"), "r_c": gettext("Alerta en flare C"),
++        "r_fa": gettext("Falsa alarma"), "r_open": gettext("En curso"),
++        "no_events": gettext("Sin flares M/X ni alertas en este período."),
++        "no_result": gettext("Sin resultado"), "no_data": gettext("Sin resultados todavía"),
+         "unreachable": gettext("No se pudo leer Centella. ¿Está corriendo su API?"),
+-        "loading": gettext("Cargando…"), "window": gettext("Período"),
+-        "help_img": gettext("Imágenes synoptic de AIA, cada 2 minutos. Centella usa los cuatro canales a la vez."),
+-        "help_diff": gettext("Diferencia: la imagen del instante menos el promedio de las de 8, 10 y 12 minutos antes, en cuentas por segundo. Lo que se ilumina aquí es lo que Centella evalúa."),
+-        "cam_cap": gettext("Grad-CAM: dónde miró la red para decidir (rojo = más peso). Su intensidad sigue a la probabilidad."),
+-        "loc_cap": gettext("El recuadro marca la región de mayor aumento en 131 Å (ubicación de Centella). Norte arriba, oeste a la derecha."),
+-        "now": gettext("Ahora"), "stale": gettext("Datos con retraso"),
+-        "live": gettext("En vivo"), "follow": gettext("Volver a ahora"),
+-        "delay": gettext("min"), "compared": gettext("Comparado con"),
++        "loading": gettext("Cargando…"),
+     }
+ 
+ 
+-- 
+2.43.0
+

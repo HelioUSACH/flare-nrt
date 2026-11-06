@@ -1,0 +1,371 @@
+From 37d88cc995d1cf8639be622702c5daa3dc06f490 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 4 Nov 2026 08:30:44 -0300
+Subject: [PATCH] web: a box around the flare on the disk, the Grad-CAM and the
+ 4 channels
+
+From the region's bounding box (Centella >= 2.5 bbox_arcsec; area as a
+fallback) plus 30" a side, at least 160", server-rendered and redrawn by
+flare-page.js for each instant (the open event's location during decay).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019TiLZJK6V4V5hFsgBRSyAK
+---
+ locale/en/LC_MESSAGES/django.mo             | Bin 40126 -> 40365 bytes
+ locale/en/LC_MESSAGES/django.po             |   5 +++
+ web/flare_page.py                           |  28 +++++++++++----
+ web/static/web/css/base.css                 |   7 ++--
+ web/static/web/js/flare-page.js             |  36 +++++++++++++++-----
+ web/templates/web/product_detail_flare.html |   6 ++--
+ web/tests/test_flare_page.py                |  21 ++++++++++++
+ web/views.py                                |   2 +-
+ 8 files changed, 84 insertions(+), 21 deletions(-)
+
+diff --git a/locale/en/LC_MESSAGES/django.mo b/locale/en/LC_MESSAGES/django.mo
+index fe6706ba44469b45b983a634930b1e941a7b6294..8c8f2a7b190a91bb63c5ef92fc38f75a2c169b54 100644
+GIT binary patch
+delta 6809
+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
+L-u36n*W&&Mu#te!
+
+delta 6676
+zcmYM&2~?L=8prV~n*y@RBCBi$h~R>|hzk%}m>6nA<x(IKhKeR==-;ud6c?nFM4d9V
+zaLv)0u*~B*YMUOH${8!uaw^TzbV|$7#`*rd?>W=y^tt!G%YE*1pZfxBf6r~-9yiyS
+zV2_oCf12AE6OBK&SI?Ne5&yRf&G+f2;|27?ut;OPFbUgY8n(ks$1G<&4+9w=i9XCR
+z9!FtClrgi7ahW~L`mP>~F{T_Z<3Su3Ym8!v>ST;Brl2P5g<LWN(GyEB94Ddzt3`Kw
+z4mI&&r@sa}(0>Jka5wf~eshS%T@3t=nlLubm=H`u1u_KRN6&b>!UL%LjyU}<PywDp
+z1$Y^~@fzmgZCr$T2{zzk=tKV`PGx@c4Gn)ROf)93jWH9j8~taJY{a{<7yS=WE4+my
+z$@p|OCKyvt_YcH4ti&o@f_m>wyof%mavEMkZQ0~x@~=h}4Mjf7aV{3qe-@d`e2r=7
+zmSO|QKxH5cQ*i_;V>3{xeF2%%G$V^Q`;p|DbEr(Y@sJkepGy9<S2+xXVLle(c+`V$
+zqBovEt^6wt#UHT+Z=)x+P@zic4#z#%mi|H1gh#LxPa*YZ2C*8|LU9`TSJh8pAPyJd
+zUvUd=#1UO>ab0%wO1A;UVmq#<po*~vvN%(SD#qD36j$Id{0#FkEW=Jb9(BN~T{Hq{
+zEOA_mO5rxAzYkT#M^P&{i&|MO8?G%YK&7(C>A!$}^p~S*WF2ay?>YTr=u7_+2B7N(
+z4SyQm-8pL55tWf%s0T-*0xCnTxW?(vNB%X9{D*on2e2<*L~Ut84;%Phs3Pr)K6npm
+zzOfjj^Iu9sDV&7^aV2V^6Q~t_iF)8$48kj@47l|qSoCpB#6bF4*c(Tp?t2DDU_C0(
+zlURnguukXy(M(%xXEB%yZOErq9)jMOf||G|-iNuUfL=rod<`|x8yJFbq5?mNn(#1Y
+z;J<MU#uJ^c&q80F|G6}@;zg+9X+*7T3+k91zz{r++M4fC0lM|EsSb0Dbd1GTt|y=t
+z^cAwp<}x0_SoUcUeuu7^G!pvR0GjX~`mdrQ{RtJokp6bXBT*ASj347PoQ(qp@Fl~y
+zPzy<7A2o40>N_w5IjLqcYJm-?8fh8mod0bMs2X=V?sq(n`HX*qT6s#AF&tr&hyTQB
+zs68Lfa<oMcqN=+RL$L;5!KJ7LrDq$%n#=+uiRQg*@*hRxDg%14-(Y?aVL#OQoq}_4
+z2NHux9b&(PWvD$|fm+GSs6f`DYGylXrSG7wAHz8O48!m@RPFe>m_^4T5GybW$)Z_^
+zig-UNrJ;O9^gt|X3lfoUis_51unZN@EsQ|-9J^&PsEl+)1=J6Vu@DQ;wb{9F9U~d=
+z&$TZ|MNOQ8PhtT+hVP;Rh|RMv?uoVZvr)D34tB(Ys4e;0@fW;vy6(33g<zE%`ycNN
+zGz_;F)}fBq7JR;qF?-OH{!l7YnaW44@P2$0r=V)%7;eR%Q7eA=UR!h<u?zj9xB_pW
+zGEmR*V|D(&qoLw+A8A+I0Ym6VqxQ6i<1p0L6rnP(41Mr5RO+{*JHCYqxE06ZKGe!X
+z_;{pYGR9z$WPUT9h953RJ-80p4YL6?(Ru8JH&Mr^`zZTkxdioM7p7w)>c#s}MR*2v
+z{{=jQ!G(67tEgJIjV@JV_-Ol6Dg%?~PsdVRg?;cQ_QRg{+b>!rDxgN}fghqWbpr#?
+zr-)TzB)Z`+RHpK95*DKF-&I8Z*U~t^z)YMthBJvLF$7nTKNZ#MsQzvY#gFjL3Q?cl
+z3mAu2Fa?9gQA5<u0F1;D57?S0W#jd}X{Zd$Ehhg7G*&Wj1zWKlZhp|Fb{A?(4xzpi
+zhtVI;qgHSo6<FI6dtWsA(oaCuL<VYWd!q;DpaK|<dhb{l4L$G>cEEB}%AQ8uI1iP&
+zdejS6p&nd=s_ONq3>-n-_c?09v#9r8LIrpOb)Wx3_Pt@K47d_$l+zf9s@@H#iQYif
+z#x_(S2au1XIgWa9z{B>wDAe^h)Ob27fc_Yd`N$5K3RK1_QCnAMb(!aAL^IHUTETYI
+zjjgBvK1OBc8`KJZL%sMG>i*bA>=veC5d8vF0OOth6ugs3)YjFbinJL!==^V?ahQR9
+zsNz{X-lldp-YGIv$}gby^fD@tYmR?9<DL_2&9ujBT<?T~SbFG0{i4BnpF~~Zaina_
+z9KK$AnBRO(LlG|H`>F}opeEdek+>Dz@dMNfKSAAh+8O@=m9dLX|0Zgsx1Di+&a#TU
+z6Do7VP#G#kS1^rg8k=yTV_KPA;R#e=U!Ye011ja0&;$QK1@b56V%y0SEEb?A9!A}N
+z0(rGLjS6fi1?NU)3d_mAQeO19O<f%hpuZdy;V0M;PoV<2iYfSCRA!PZ*k>Gu+LHBn
+z3O6I!Hw&JyfuD2y5f%6qRDjo>Apg{nxye8r7FXIY*KAY(>roNEiJEvHY75Sz0=j_;
+z&})i*n2=(O!fe#_66}WM=#EXOqF#f1tIRGJ4L#8AN&DeR!uIsjQRj95HsUB$<mb>E
+z&!aD1MKAmlebA$dpNtrQq4+3j0kx>}{yfIvE4Uh6`)RDFQ8LxO;1=HbqD`{_MLTvz
+ztuO<-;7E+XS{#gxn2n#}5Dc1bxAcD0ipx;Pt`4=pC3f6pR@2Z*b~-ogMLt&M2x`U2
+z)pmtlu^0VJr~f$m(VvP6Y%c0OYf%|(ary_*pZ;-FhR!<IFJidPzt;>KSuE;>8K`2)
+z!a&T$yKpQfVIB6t^{72Pg?jO6494?L|34T+-*cul9AoIG;t<Tow#;u{prJi%Kt<Yw
+zdhm7KfUT$^+m9jm1uBJ?F%xg1YNFdy_Sg6Rm`MLw<e-=qoQ*-V?4RNFsP}KhJLms>
+z8afWgQ33n|3-No@p7p7*TX8okpnFj-C_+6~hVfX5`p_)J`*0^}3vc6{;;gmL2VfZE
+z;kD#nDa&9$dp8t2;7AO`Nf?ebs8la^e9^H9w=up3_1til*&QFo9k>(+V%8k{$*n~#
+z;8QHXFXxbdMVkDyy)X;)qIswlHsWgBh%CZn^C9OWX8w-avY5FxV@cSFekSTWQG{AR
+z9V+lf$5p5rYer?Z#YICYZ^c3QA!@~*^X%_#G58VveAEMh1gxTrLj~9aHJ*bTun0%t
+z@0f=9^X;GIGcc0=R#Y*6fZfn_iAH}KF@LfDbLas~r~eV^1=mq~n6SXEBpEef8n(lM
+zs0HLY*NadYe83s6MAgU~)E3XjM{o(URW5Up#=Q(gJ!4Z^j+(FvwZa+L2^ZoD+=NPf
+z-)HRyC>s?}G3pdNjw-Hd9D|E+FrGoZFLt5*K6J+jo&N$FDvHTC0jp5ee-yQnPS4qu
+zW?~WjEYw5|sI6*t`nymQ>_rvzQB+{xVxAkHYSgjqyU32`q95~{F*K^%@U2Eq`X?9L
+z<MI_o(EkC)qN%r$kHa_UR--0}Tw=GZ3ntPp#%8R;5)5Bz1FgpP^cOoep-TfBY3O|Z
+z&AG4_d(;0IHNkD?dcZQ9`bczVJl^Sd#?kb<qKb1KcE;rxjc+@CioW!JK@YsSjQr=&
+zFw1RZxkyo%(U^b>Fa|ea2p+&LcnXyn_Xc~MVlbV48t%sj(HkQv7=KK{K+MFuF&FjT
+z`W56~)wr2~KG?R={-u+R9qHF#5;kBezKzP*S;wC-p8gGFi%ryvwpL<MsZYiLT!8Da
+z5i79!OZE?)W*3bP42)Z8U;G5BdTTHUm!WFnRrJEwQ9tdrqXIgDzu|RkPYwOF%5LQ!
+zP4<26FWbEjL_L>+pJP6%=v~o#-jtdo)SmQ4eJBQ?_G&DK;3SN|S*X2lK&AF2RDc^$
+zDc_8G&u&zvTAltORE>Rt!FUqMn9E$Cp&Nffz2Fbj1a6eDUgU*Q=!?ogvSS7+fZnK;
+z<f1ZJ;9Q@GdT%*K;7lyVWvKW6iXJ-uztd1ew@?oRtg(O9Mx!!tA1aU%r#}Jp<*Ri1
+zGf`VMAK3xZgbHjmDzFyx!<`s~`%uq+i2*wQ|Dq9!zoKsRUTaetj(TwnDs{cE6Anh*
+zHvyHgC!Kx`s@N8y7P1nxfY+Sy9cVhIRHe>{n=y4t#bXsSpDNvbI>IMpLrF%??nBcr
+Gr2P+d(_k<F
+
+diff --git a/locale/en/LC_MESSAGES/django.po b/locale/en/LC_MESSAGES/django.po
+index bd8448b..fbf2b4c 100644
+--- a/locale/en/LC_MESSAGES/django.po
++++ b/locale/en/LC_MESSAGES/django.po
+@@ -1248,3 +1248,8 @@ msgstr "Source and period"
+ 
+ msgid "No se pudo leer Centella. ¿Está corriendo su API?"
+ msgstr "Centella could not be read. Is its API running?"
++
++# flare box (D-102)
++
++msgid "El recuadro marca la región de mayor aumento en 131 Å (ubicación de Centella). Norte arriba, oeste a la derecha."
++msgstr "The box marks the region of largest increase at 131 Å (Centella's location). North up, west to the right."
+diff --git a/web/flare_page.py b/web/flare_page.py
+index dfe0763..b03e488 100644
+--- a/web/flare_page.py
++++ b/web/flare_page.py
+@@ -79,13 +79,29 @@ def _location_text(loc: dict | None, lang: str) -> str:
+ AIA_HALF_FOV = 1024 * 2.4 / 2          # synoptic images: 1024 px × 2.4″, centred on the Sun
+ 
+ 
+-def _disk_marker(loc: dict | None) -> dict | None:
+-    """Percent position on Centella's preview (north up, west right) of a
+-    helioprojective position in arcsec."""
++BOX_PAD = 30.0      # arcsec added around the detected region on each side
++BOX_MIN = 160.0     # arcsec: never smaller, so it reads even on the channel thumbnails
++
++
++def flare_box(loc: dict | None) -> dict | None:
++    """Square around the flare on Centella's previews (north up, west right),
++    as CSS percentages of the image: ``left``/``top`` of its corner and
++    ``size``. From the region's bounding box (Centella ≥ 2.5, ``bbox_arcsec``)
++    plus ``BOX_PAD``, else from its area around the centroid; at least
++    ``BOX_MIN`` wide. flare-page.js draws the same box (``boxFor``)."""
+     if not loc or not loc.get("centroid_arcsec"):
+         return None
+-    x, y = loc["centroid_arcsec"]
+-    return {"left": round(50 + x / AIA_HALF_FOV * 50, 1), "top": round(50 - y / AIA_HALF_FOV * 50, 1)}
++    bb = loc.get("bbox_arcsec")
++    if bb and len(bb) == 4:
++        cx, cy = (bb[0] + bb[2]) / 2, (bb[1] + bb[3]) / 2
++        side = max(bb[2] - bb[0], bb[3] - bb[1]) + 2 * BOX_PAD
++    else:
++        cx, cy = loc["centroid_arcsec"]
++        side = 1.6 * math.sqrt(max(float(loc.get("area_arcsec2") or 0), 0.0)) + 2 * BOX_PAD
++    side = max(side, BOX_MIN)
++    k = 50 / AIA_HALF_FOV
++    return {"left": round(50 + (cx - side / 2) * k, 2), "top": round(50 - (cy + side / 2) * k, 2),
++            "size": round(side * k, 2)}
+ 
+ 
+ def _peak_flux(t0: dt.datetime, t1: dt.datetime) -> float | None:
+@@ -170,7 +186,7 @@ def flare_context(product, heartbeat_status: str, lang: str, view: str) -> dict:
+             "latency_min": round(q["data_latency_s"] / 60) if q.get("data_latency_s") is not None else None,
+             "model_version": q.get("model_version"),
+             "location": _location_text(p.get("location"), lang),
+-            "marker": _disk_marker(p.get("location") or (open_event or {}).get("raw_location")),
++            "marker": flare_box(p.get("location") or (open_event or {}).get("raw_location")),
+             "open_event": open_event,
+             "last_event": events[0] if events else None,
+             "view": "diff" if view in {"diff", "diferencia"} else "img",
+diff --git a/web/static/web/css/base.css b/web/static/web/css/base.css
+index 9ee2473..4a06e0c 100644
+--- a/web/static/web/css/base.css
++++ b/web/static/web/css/base.css
+@@ -576,7 +576,9 @@ pre.code { background: var(--band); border: 1px solid var(--line); border-radius
+ .flare-disk .eyebrow { color: var(--sun); }
+ .flare-disk__img { position: relative; width: 100%; max-width: 380px; margin: 0 auto; aspect-ratio: 1 / 1; background: var(--space-2); border-radius: 8px; overflow: hidden; }
+ .flare-disk__img img, .flare-ch img { width: 100%; height: auto; display: block; }
+-.flare-disk__mark { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border: 2px solid var(--sun); border-radius: 50%; box-shadow: 0 0 0 5px rgba(240, 161, 74, .2); }
++.fx-box { position: absolute; box-sizing: border-box; border: 2px solid var(--sun); border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(0, 0, 0, .35); pointer-events: none; }
++.fx-box::after { content: "flare"; position: absolute; left: -2px; bottom: 100%; margin-bottom: 3px; padding: 1px 6px; border-radius: 3px; background: var(--sun); color: var(--space); font-family: var(--font-ui); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
++.fx-box--ch::after { font-size: 9.5px; padding: 0 4px; }
+ .flare-disk figcaption { font-size: 12.5px; color: var(--space-soft); }
+ .seg-link { font-family: var(--font-ui); font-size: 12.5px; color: var(--ink-soft); border-radius: 999px; padding: 6px 14px; text-decoration: none; }
+ .seg-link.on { background: var(--ink); color: var(--bg); }
+@@ -652,7 +654,8 @@ pre.code { background: var(--band); border: 1px solid var(--line); border-radius
+ .seg button:disabled { opacity: .4; cursor: not-allowed; }
+ .fx-disk-holder, .fx-ch-img { width: 100%; aspect-ratio: 1 / 1; }
+ .fx-disk-holder img, .fx-ch-img img { width: 100%; height: auto; display: block; border-radius: 8px; background: var(--space-2); }
+-.fx-ch-img { background: var(--space-2); border-radius: 8px; }
++.fx-ch-img { position: relative; background: var(--space-2); border-radius: 8px; }
++.fx-ch-pic { width: 100%; height: 100%; }
+ .fx-none { height: 100%; display: grid; place-items: center; text-align: center; padding: 16px; font-size: 12.5px; color: var(--space-soft); }
+ .fx-tobs { font-family: var(--font-mono); font-size: 11.5px; }
+ .fx-lists { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+diff --git a/web/static/web/js/flare-page.js b/web/static/web/js/flare-page.js
+index 50d87a1..f1b311c 100644
+--- a/web/static/web/js/flare-page.js
++++ b/web/static/web/js/flare-page.js
+@@ -240,13 +240,32 @@
+       if (row.n_baseline_used) note += (note ? ". " : "") + T.compared + " " + row.n_baseline_used + " " + T.of + " " + row.n_baseline + " " + T.frames_before + ".";
+     }
+     $("fx-note").textContent = note;
+-    var mark = $("fx-mark");
+-    if (row.location && row.location.centroid_arcsec && S.disk === "img") {
+-      var x = row.location.centroid_arcsec[0], y = row.location.centroid_arcsec[1];
+-      mark.style.left = (50 + x / CFG.half_fov * 50) + "%";
+-      mark.style.top = (50 - y / CFG.half_fov * 50) + "%";
+-      mark.hidden = false;
+-    } else mark.hidden = true;
++    // the flare's box: this slot's location, else (decay) the open event's
++    var ev = open ? eventAt(f.t) : null;
++    var b = boxFor(row.location || (ev && ev.location));
++    document.querySelectorAll(".fx-box").forEach(function (el) {
++      if (!b) { el.hidden = true; return; }
++      el.style.left = b.left + "%"; el.style.top = b.top + "%";
++      el.style.width = b.size + "%"; el.style.height = b.size + "%";
++      el.hidden = false;
++    });
++  }
++
++  // same box as web/flare_page.py flare_box(): the region's bounding box + 30″ a side
++  // (or its area around the centroid), at least 160″, as % of the north-up preview
++  function boxFor(loc) {
++    if (!loc || !loc.centroid_arcsec) return null;
++    var cx, cy, side, bb = loc.bbox_arcsec;
++    if (bb && bb.length === 4) {
++      cx = (bb[0] + bb[2]) / 2; cy = (bb[1] + bb[3]) / 2;
++      side = Math.max(bb[2] - bb[0], bb[3] - bb[1]) + 60;
++    } else {
++      cx = loc.centroid_arcsec[0]; cy = loc.centroid_arcsec[1];
++      side = 1.6 * Math.sqrt(Math.max(+loc.area_arcsec2 || 0, 0)) + 60;
++    }
++    side = Math.max(side, 160);
++    var k = 50 / CFG.half_fov;
++    return { left: 50 + (cx - side / 2) * k, top: 50 - (cy + side / 2) * k, size: side * k };
+   }
+ 
+   function renderImages(f, d) {
+@@ -260,7 +279,6 @@
+       setImg(holder, withSrc(U.gradcam.replace("SLOT", f.slot)), "Grad-CAM", T.no_gradcam);
+       $("fx-disk-label").textContent = "AIA 131 Å + Grad-CAM · " + hm(f.t) + " UT";
+       $("fx-disk-cap").textContent = T.cam_cap;
+-      $("fx-mark").hidden = true;
+     } else {
+       setImg(holder, d.images.indexOf(131) >= 0 ? imgUrl(f.slot, 131, "img") : null, "AIA 131 Å", T.no_image);
+       $("fx-disk-label").textContent = "AIA 131 Å · " + hm(f.t) + " UT";
+@@ -272,7 +290,7 @@
+       var w = parseInt(fig.dataset.wave, 10);
+       var have = S.kind === "img" ? d.images.indexOf(w) >= 0 : d.differences.indexOf(w) >= 0;
+       var why = S.kind === "diff" && d.images.indexOf(w) >= 0 ? T.no_diff : T.no_image;
+-      setImg(fig.querySelector(".fx-ch-img"), have ? imgUrl(f.slot, w, S.kind) : null, "AIA " + w + " Å", why);
++      setImg(fig.querySelector(".fx-ch-pic"), have ? imgUrl(f.slot, w, S.kind) : null, "AIA " + w + " Å", why);
+       var tobs = row.inputs && row.inputs[String(w)];
+       fig.querySelector(".fx-tobs").textContent = tobs ? "T_OBS " + tobs.slice(11, 19) : "";
+     });
+diff --git a/web/templates/web/product_detail_flare.html b/web/templates/web/product_detail_flare.html
+index f6b0894..25a118c 100644
+--- a/web/templates/web/product_detail_flare.html
++++ b/web/templates/web/product_detail_flare.html
+@@ -73,9 +73,9 @@
+         <span class="seg" role="group" id="fx-disk-seg" hidden><button type="button" class="seg-link on" id="fx-disk-img">131 Å</button><button type="button" class="seg-link" id="fx-disk-cam">Grad-CAM</button></span></div>
+       <div class="flare-disk__img" id="fx-disk">
+         <div class="fx-disk-holder"><img src="{% url 'web:flare_image' 131 %}" alt="{% trans 'Imagen más reciente del Sol en 131 Å' %}" width="512" height="512"></div>
+-        <span class="flare-disk__mark" id="fx-mark"{% if flare.marker %} style="left: {{ flare.marker.left|unlocalize }}%; top: {{ flare.marker.top|unlocalize }}%"{% else %} hidden{% endif %}></span>
++        <span class="fx-box" id="fx-mark"{% if flare.marker %} style="left: {{ flare.marker.left|unlocalize }}%; top: {{ flare.marker.top|unlocalize }}%; width: {{ flare.marker.size|unlocalize }}%; height: {{ flare.marker.size|unlocalize }}%"{% else %} hidden{% endif %}></span>
+       </div>
+-      <figcaption id="fx-disk-cap">{% trans "Ubicación experimental: la región de mayor aumento en 131 Å. Norte arriba, oeste a la derecha." %}</figcaption>
++      <figcaption id="fx-disk-cap">{% trans "El recuadro marca la región de mayor aumento en 131 Å (ubicación de Centella). Norte arriba, oeste a la derecha." %}</figcaption>
+     </figure>
+   </section>
+ 
+@@ -134,7 +134,7 @@
+       {% for ch in flare.channels %}
+       <figure class="flare-ch" data-wave="{{ ch.wave }}">
+         <div class="flare-ch__name">{{ ch.wave }} Å</div>
+-        <div class="fx-ch-img"><img src="{% url 'web:flare_image' ch.wave %}{% if flare.view == 'diff' %}?tipo=diferencia{% endif %}" alt="{% blocktrans with w=ch.wave %}AIA {{ w }} Å{% endblocktrans %}" width="512" height="512" loading="lazy"></div>
++        <div class="fx-ch-img"><div class="fx-ch-pic"><img src="{% url 'web:flare_image' ch.wave %}{% if flare.view == 'diff' %}?tipo=diferencia{% endif %}" alt="{% blocktrans with w=ch.wave %}AIA {{ w }} Å{% endblocktrans %}" width="512" height="512" loading="lazy"></div><span class="fx-box fx-box--ch"{% if flare.marker %} style="left: {{ flare.marker.left|unlocalize }}%; top: {{ flare.marker.top|unlocalize }}%; width: {{ flare.marker.size|unlocalize }}%; height: {{ flare.marker.size|unlocalize }}%"{% else %} hidden{% endif %}></span></div>
+         <figcaption><b>{{ ch.ion }}</b><span>{{ ch.what }}</span><span class="fx-tobs"></span></figcaption>
+       </figure>
+       {% endfor %}
+diff --git a/web/tests/test_flare_page.py b/web/tests/test_flare_page.py
+index d877363..a55895a 100644
+--- a/web/tests/test_flare_page.py
++++ b/web/tests/test_flare_page.py
+@@ -246,3 +246,24 @@ def test_xray_window_for_the_timeline(client):
+     assert len(r["points"]) == 60 and r["points"][0][1] == pytest.approx(1e-6)
+     assert client.get(url, {"start": "2026-06-01T00:00:00Z", "end": "2026-07-01T00:00:00Z"}).status_code == 400
+     assert client.get(url).status_code == 400
++
++
++
++def test_flare_box_from_bbox_and_from_area():
++    # bbox 150″ × 100″ centred at (+600, −300): side 150 + 2 × 30 = 210″
++    b = flare_page.flare_box({"centroid_arcsec": [600, -300], "bbox_arcsec": [525, -350, 675, -250]})
++    k = 50 / flare_page.AIA_HALF_FOV
++    assert b == {"left": round(50 + 495 * k, 2), "top": round(50 + 195 * k, 2), "size": round(210 * k, 2)}
++    small = flare_page.flare_box({"centroid_arcsec": [0, 0], "area_arcsec2": 25})   # tiny: the minimum
++    assert small["size"] == round(flare_page.BOX_MIN * k, 2)
++    assert small["left"] == round(50 - flare_page.BOX_MIN / 2 * k, 2)
++    assert flare_page.flare_box(None) is None and flare_page.flare_box({"centroid_arcsec": None}) is None
++
++
++@pytest.mark.django_db
++def test_page_draws_the_box_on_the_disk_and_the_channels(client):
++    _fixture_day(open_event=True)
++    body = client.get(reverse("web:product_detail", args=[PID])).content.decode()
++    assert body.count('class="fx-box') == 5                      # disk + 4 channels
++    assert len(re.findall(r'class="fx-box[^>]*style="left: [\d.]+%; top: [\d.]+%; width: [\d.]+%', body)) == 5
++    assert re.search(r'class="fx-box" id="fx-mark" style="left: [\d.]+%; top: [\d.]+%; width: [\d.]+%', body)
+diff --git a/web/views.py b/web/views.py
+index dfbc16e..2870a4e 100644
+--- a/web/views.py
++++ b/web/views.py
+@@ -659,7 +659,7 @@ def _flare_i18n() -> dict:
+         "help_img": gettext("Imágenes synoptic de AIA, cada 2 minutos. Centella usa los cuatro canales a la vez."),
+         "help_diff": gettext("Diferencia: la imagen del instante menos el promedio de las de 8, 10 y 12 minutos antes, en cuentas por segundo. Lo que se ilumina aquí es lo que Centella evalúa."),
+         "cam_cap": gettext("Grad-CAM: dónde miró la red para decidir (rojo = más peso). Su intensidad sigue a la probabilidad."),
+-        "loc_cap": gettext("Ubicación experimental: la región de mayor aumento en 131 Å. Norte arriba, oeste a la derecha."),
++        "loc_cap": gettext("El recuadro marca la región de mayor aumento en 131 Å (ubicación de Centella). Norte arriba, oeste a la derecha."),
+         "now": gettext("Ahora"), "stale": gettext("Datos con retraso"),
+         "live": gettext("En vivo"), "follow": gettext("Volver a ahora"),
+         "delay": gettext("min"), "compared": gettext("Comparado con"),
+-- 
+2.43.0
+
