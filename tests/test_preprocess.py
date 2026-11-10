@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 
-from centella.preprocess import build_current, build_input, normalize_asinh, resize_512
+from flare_nrt.preprocess import build_current, build_input, normalize_asinh, resize_512
 
 
 def test_normalize_asinh_reference_values():

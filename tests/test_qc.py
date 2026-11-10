@@ -2,8 +2,8 @@ import datetime as dt
 
 from conftest import T0, write_fits
 
-from centella.grid import CHANNELS, file_name
-from centella.qc import QualityControl
+from flare_nrt.grid import CHANNELS, file_name
+from flare_nrt.qc import QualityControl
 
 
 def _slot(tmp_path, slot, bad_wave=None, **bad):

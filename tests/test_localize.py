@@ -1,6 +1,6 @@
 import numpy as np
 
-from centella.localize import localize, rate_map
+from flare_nrt.localize import localize, rate_map
 
 HDR = {"NAXIS1": 1024, "CRPIX1": 512.5, "CRPIX2": 512.5, "CDELT1": 2.4, "CDELT2": 2.4,
        "RSUN_OBS": 960.0, "EXPTIME": 2.9}

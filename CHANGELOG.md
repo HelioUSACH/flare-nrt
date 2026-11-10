@@ -1,24 +1,82 @@
 # Changelog
 
-## 2.5.0 — 2026-11-04
+## 0.9.0 — 2026-11-10
+
+First published release, after the review of the portal maintainers
+(2026-11-06). The model and its weights are the same as in internal
+version 2.5 (same two files, same SHA-256); what changes is the name,
+the numbering and the defaults for the portal's server. Each item below
+answers the review item of the same number.
+
+1. **Repository restored to git.** `.gitignore`, `.env.example` and the
+   CI workflow (`.github/workflows/ci.yml`: ruff, pytest, and a check that
+   the old name is gone) are back; they had been dropped by an upload
+   through GitHub's web page. Changes go through git commits from now on.
+2. **Renamed: the model is no longer called "Centella". It is `flare-nrt`**
+   until the maintainers choose a name:
+   - Python package `centella` → `flare_nrt` (`python -m flare_nrt.loop`,
+     `uvicorn flare_nrt.server:app`); distribution name `flare-nrt`;
+   - settings `CENTELLA_*` → `FLARE_NRT_*`;
+   - units `centella-*` → `flare-nrt-*`; system user `centella` →
+     `flare-nrt`; `/opt/centella`, `/srv/centella`, `/etc/centella/` →
+     `/opt/flare-nrt`, `/srv/flare-nrt`, `/etc/flare-nrt/`
+     (`flare-nrt.env`);
+   - `/api/status` `model` → `"flare-nrt"` (the portal's provenance
+     producer becomes `flare-nrt@0.9.0`); the HTTP `User-Agent` and the
+     viewer's titles follow;
+   - archive schema `centella-archive/1` → `flare-nrt-archive/1` (same
+     layout; nothing had been pulled off-server yet);
+   - the validation report's per-flare key `centella` → `flare_nrt`.
+   The repository keeps its name, `HelioUSACH/flare-nrt`.
+3. **No portal code in this repository.** The proposed portal patches are
+   not part of it; the maintainers design the portal's flare page. The
+   internal display endpoints (`/api/events`, `/api/series`,
+   `/api/frames`, `/api/image/…`, `/api/gradcam/…`, `/api/health`,
+   `/viewer`) are unchanged: they are what the portal will read.
+4. **Versions restart at 0.9.0** (`pyproject.toml`, `flare_nrt.__version__`,
+   `/api/status` `model_version`, `INTEGRATION.md`). The internal versions
+   1.x–2.5 are kept below. The weights are fetched from the `v0.9.0`
+   release.
+5. **`tests/test_real_weights.py`** skips unless all four of
+   `FLARE_NRT_REAL_WEIGHTS`, `_REAL_NORM`, `_REAL_FITS` and `_REAL_EXPECT`
+   are set (it failed with `KeyError` when only the first one was).
+6. **`FLARE_NRT_TORCH_THREADS` defaults to 2**, matching the loop unit's
+   `CPUQuota=200%` (was 4).
+7. **`FLARE_NRT_STAGING_DAYS` defaults to 4** (was 7): ≈ 11 GB of raw FITS,
+   ≈ 17–20 GB for the whole data directory. Tensors stay at 2 days.
+   `INTEGRATION.md`, `deploy/README.md` and `docs/archive-format.md` give
+   the new numbers.
+8. **`INTEGRATION.md`'s open questions are answered:** disk → 4 days of
+   FITS; off-server copy → the maintainers pull `/srv/flare-nrt/archive`
+   to a backup server, and the archive layout stays stable and versioned;
+   display endpoints → the internal contract for now.
+
+Also: `deploy/README.md`'s install block runs as is (it creates the user
+and writes the three paths into the settings file).
+
+## Pre-release development (internal versions 1.x–2.5)
+
+These versions were never published. Their numbers are internal.
+
+### 2.5.0 — 2026-11-04
 
 - `location` adds `bbox_arcsec` [x0, y0, x1, y1]: the bounding box of the
   detected region in helioprojective arcsec (x west, y north). Pages use it
   to draw a box around the flare. Additive: the other fields are unchanged.
 
-## 2.4.1 — 2026-11-03
+### 2.4.1 — 2026-11-03
 
 - The experimental 131 Å rule added in 2.4.0 is removed (owner's
   decision: the product is the neural network only). Results, status and
   events are exactly as in 2.3.0; `events_aia131.csv` files left by 2.4.0
   are no longer read.
 
-## 2.4.0 — 2026-11-03 (withdrawn)
+### 2.4.0 — 2026-11-03 (withdrawn)
 
 Ran the 131 Å rule live as an experimental signal next to the model's.
 Withdrawn in 2.4.1.
 
-## 2.3.0 — 2026-11-03
+### 2.3.0 — 2026-11-03
 
 Location validated against a catalogue. Model card updated with the
 calibration month replayed in 2.3. Detection is beaten out of sample by
@@ -26,24 +84,24 @@ the `aia131_rise` rule (98 % vs 72 % of M/X flares); location error has a
 median of 14″; 2 of 3 baselines are identical to 3 of 3; low-probability
 alternation is mild (0.60).
 
-- `python -m centella.goes` now writes flare positions (`hpc_x`, `hpc_y`,
+- `python -m flare_nrt.goes` now writes flare positions (`hpc_x`, `hpc_y`,
   helioprojective arcsec). Each SWPC flare takes the position LMSAL's "SSW
   Latest Events" gives in AIA for the same flare (peak within 6 min, same
   letter), else SWPC's own; (0, 0) means none. `Flare.hpc` is not part of a
   flare's identity.
-- `centella.validate` reports `location`: for each detected M/X flare with
-  a position, the distance between Centella's location at its
+- `flare_nrt.validate` reports `location`: for each detected M/X flare with
+  a position, the distance between flare-nrt's location at its
   highest-probability alert and the catalogue (median, p75, fractions
   within 60/120/240″).
 
-## 2.2.1 — 2026-11-02
+### 2.2.1 — 2026-11-02
 
 - `/api/flares` adds SWPC's 7-day list for windows that reach the last 7
   days. The curated archive only covers days up to yesterday, so live pages
   were missing today's flares. The list is fetched at most every 10 min and
   the last good copy is kept on failure; `source` says `archive+swpc`.
 
-## 2.2.0 — 2026-11-02
+### 2.2.0 — 2026-11-02
 
 Retrospective viewer and past-period replays. `/api/status` is unchanged.
 
@@ -56,18 +114,18 @@ Retrospective viewer and past-period replays. `/api/status` is unchanged.
 - New endpoints: `/api/range`, `/api/frame/{slot}`, `/api/flares`.
   `/api/series`, `/api/events` and `/api/frames` take `start`/`end` for any
   past window (series up to 40 days).
-- `CENTELLA_FITS_DIRS`: the API also finds FITS by name in these
+- `FLARE_NRT_FITS_DIRS`: the API also finds FITS by name in these
   read-only trees, so a replayed month is browsed without copying it.
-  `CENTELLA_FLARES_CSV`: the GOES list shown by the viewer (default: the
+  `FLARE_NRT_FLARES_CSV`: the GOES list shown by the viewer (default: the
   curated archive's).
 - Replay (`--replay`) keeps the Grad-CAM of every alerting frame (no
   tensors; `--no-gradcam` to skip), logs progress every 12 h of data, and
   `--resume` continues after a stop. Replay rows no longer carry
   `input_age_s`, which is only meaningful live.
-- `python -m centella.goes --start --end --out`: the SWPC flare list of a
+- `python -m flare_nrt.goes --start --end --out`: the SWPC flare list of a
   past period, from HEK.
 
-## 2.1.0 — 2026-10-28
+### 2.1.0 — 2026-10-28
 
 Ready for integration into the portal (`docs/models/CONTRIBUTING-A-MODEL.md`
 checklist). Same weights and threshold; `/api/status` only adds fields.
@@ -93,8 +151,8 @@ events carry the URL of their peak's Grad-CAM. Grad-CAM of the ensemble
   (which lags) is queried at most every 10 min for at most 20 s. Before, one
   pass over 60 min × 4 channels of 404s took more than 2 min and newer
   `mostrecent/` images were missed.
-- 2 of the 3 baseline frames suffice (`CENTELLA_MIN_BASELINE=2`); the
-  validated rule used 3 of 3 (`CENTELLA_MIN_BASELINE=3` restores it).
+- 2 of the 3 baseline frames suffice (`FLARE_NRT_MIN_BASELINE=2`); the
+  validated rule used 3 of 3 (`FLARE_NRT_MIN_BASELINE=3` restores it).
 - Every result records `aia131_excess` (disk-integrated 131 Å rise over the
   same baseline), the input of the baseline rule.
 
@@ -102,13 +160,13 @@ events carry the URL of their peak's Grad-CAM. Grad-CAM of the ensemble
 (new, `tensors/`), Grad-CAM 2 days and 400 days for alerts (new), local
 archive 7 days (was 14), validation reports bounded. Steady state ≈ 25 GB.
 
-**Weights:** `python -m centella.fetch_weights` downloads the release assets
+**Weights:** `python -m flare_nrt.fetch_weights` downloads the release assets
 and verifies their SHA-256; the SHA-256 is pinned as the default of
-`CENTELLA_WEIGHTS_SHA256`; a file is never loaded unverified, and only with
+`FLARE_NRT_WEIGHTS_SHA256`; a file is never loaded unverified, and only with
 `weights_only=True` (the fallback to `weights_only=False` is gone).
 
-**Validation:** `centella.validate` scores the named baseline
-`aia131_rise` at Centella's false-alarm count and reports the
+**Validation:** `flare_nrt.validate` scores the named baseline
+`aia131_rise` at flare-nrt's false-alarm count and reports the
 low-probability alternation index.
 
 **Repo:** `HelioUSACH/flare-nrt`; `requirements.lock.txt`; `deploy/README.md`
@@ -123,25 +181,23 @@ weights (INTEGRATION.md): 10.4 s per inference on 2 vCPU, 1.14 GB peak (2.0's
 machine (onset, plateau, decay); input age; channel spread; display
 endpoints; retention.
 
-## 2.0.1 (folded into 2.1.0)
+### 2.0.1 (folded into 2.1.0)
 
 - QC: QUALITY bit 30 (0x40000000, quicklook) is no longer a reject. Every near-real-time AIA image has it, so in live mode every slot was `qc_reject` and no probability was ever made.
 - Live source: each `mostrecent/` image is filed (as a copy) under every 2-min slot within 90 s of its T_OBS (the QC time tolerance), not only under floor(T_OBS). Before, images taken late in their slot failed `time_offset` and slots rarely had all 4 channels.
-- Loop: on a cold start it no longer waits for slots from before the start that only the lagging archive could fill. `CENTELLA_SKIP_AFTER_MIN` default 20 → 12.
+- Loop: on a cold start it no longer waits for slots from before the start that only the lagging archive could fill. `FLARE_NRT_SKIP_AFTER_MIN` default 20 → 12.
 - API: `/api/image` and `/api/channels` show the newest staged image of each channel until the first full result exists (the difference once t−8/−10/−12 are staged).
 
-## 2.0.0 — 2026-10-26
+### 2.0.0 — 2026-10-26
 
 Recalibration on live synoptic data; same network weights as 1.x.
 
 - **Live source** reads JSOC `mostrecent/` every poll (filed under the slot of
   its own T_OBS) besides the dated archive, which lags behind real time;
-  `CENTELLA_STAGING_HOURS` keeps only the last N hours of raw FITS on a
+  `FLARE_NRT_STAGING_HOURS` keeps only the last N hours of raw FITS on a
   small disk; a cold start skips the slots the archive lacks.
 - **Python 3.10+** (was 3.11): `dt.timezone.utc`, and one ISO parser
   (`grid.parse_datetime`) for every provider time spelling.
-- **Renamed to Centella** (package `centella`, settings `CENTELLA_*`, units
-  `centella-*.service`). The portal product id stays `usach.flare.nrt`.
 
 - **Rolling baseline**: input difference against the mean of t−8, t−10,
   t−12 min, replacing the hourly "quiet Sun" baseline whose age grew to

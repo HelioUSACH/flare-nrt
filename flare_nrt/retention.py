@@ -3,7 +3,7 @@
 
 Rules:
 
-1. Raw AIA FITS (``staging/YYYYMMDD/``) older than ``staging_days`` (7 ×
+1. Raw AIA FITS (``staging/YYYYMMDD/``) older than ``staging_days`` (4 ×
    24 h, by slot time) are deleted; curation (daily) has copied what is
    worth keeping to the archive long before.
 2. ``staging_hours`` > 0 (a small disk) replaces that age with N hours.

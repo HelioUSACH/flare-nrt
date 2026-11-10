@@ -1,0 +1,25 @@
+# Example unit: the status API the portal polls (127.0.0.1 only).
+[Unit]
+Description=flare-nrt status API (127.0.0.1:5050)
+After=network.target
+
+[Service]
+Type=simple
+User=flare-nrt
+Group=flare-nrt
+WorkingDirectory=/opt/flare-nrt
+EnvironmentFile=/etc/flare-nrt/flare-nrt.env
+ExecStart=/opt/flare-nrt/.venv/bin/uvicorn flare_nrt.server:app --host 127.0.0.1 --port 5050 --workers 1
+Restart=always
+RestartSec=5
+CPUQuota=100%
+MemoryMax=512M
+NoNewPrivileges=true
+ProtectSystem=strict
+# reads everything; writes only its PNG preview cache
+ReadOnlyPaths=/srv/flare-nrt
+ReadWritePaths=/srv/flare-nrt/cache
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -9,7 +9,7 @@ re-training, besides the result row:
   (2), and ``HHMM_alert.png`` for alerting frames, kept
   ``gradcam_alert_days`` (400).
 
-Live mode keeps both. A replay (``python -m centella.loop --replay``) keeps
+Live mode keeps both. A replay (``python -m flare_nrt.loop --replay``) keeps
 only the Grad-CAM of alerting frames, for the retrospective viewer: a month
 of tensors would be ~60 GB."""
 

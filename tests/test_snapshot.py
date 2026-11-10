@@ -6,7 +6,7 @@ loop built for AIA slot 2026-10-28T15:52Z (quiet Sun; provenance in the
 (conftest); with the real weights it must give the probability recorded in
 the .json, to ``tolerance`` (1e-4):
 
-    CENTELLA_REAL_WEIGHTS=models/deployment_ensemble_thr058.pt pytest tests/test_snapshot.py
+    FLARE_NRT_REAL_WEIGHTS=models/deployment_ensemble_thr058.pt pytest tests/test_snapshot.py
 """
 
 import json
@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 import torch
 
-from centella.model import Ensemble, sha256
+from flare_nrt.model import Ensemble, sha256
 
 FIX = Path(__file__).parent / "fixtures"
 META = json.loads((FIX / "snapshot_20261028T1552Z.json").read_text())
@@ -38,9 +38,9 @@ def test_snapshot_through_stand_in_ensemble(stand_in_weights):
     assert cam.shape == (512, 512)
 
 
-@pytest.mark.skipif(not os.environ.get("CENTELLA_REAL_WEIGHTS"), reason="real weights not configured")
+@pytest.mark.skipif(not os.environ.get("FLARE_NRT_REAL_WEIGHTS"), reason="real weights not configured")
 def test_snapshot_through_real_weights():
-    w = Path(os.environ["CENTELLA_REAL_WEIGHTS"])
+    w = Path(os.environ["FLARE_NRT_REAL_WEIGHTS"])
     ens = Ensemble.load(w, META["real_weights_sha256"], device="cpu")
     p, scores = ens.predict(X)
     assert abs(p - META["real_probability"]) < META["tolerance"], p

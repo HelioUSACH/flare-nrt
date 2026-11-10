@@ -1,4 +1,4 @@
-# Archive format `centella-archive/1`
+# Archive format `flare-nrt-archive/1`
 
 What the service keeps from its live input, so the model can be retrained
 and re-validated on the data it actually runs on.
@@ -20,10 +20,11 @@ JSOC ──► staging/YYYYMMDD/AIA*.fits      raw downloads, every slot     kep
 
 Volumes: raw synoptic ≈ 0.95 MB per file, 3.8 MB per slot, ≈ 2.75 GB per
 day for 4 channels (measured on the live stream, 2026-10-28; 2.6 GB/day on
-the 2026-06/07 month). Staging steady state ≈ 19 GB (7 days). Archive
-≈ 0.4 GB (quiet day) to 1.3 GB (very active day), but its files are hard
-links into staging (below), so with both kept 7 days it adds ≲ 1.3 GB. The
-whole data directory: INTEGRATION.md "Resources". `CENTELLA_MIN_FREE_GB`
+the 2026-06/07 month). Staging steady state ≈ 11 GB (4 days). Archive
+≈ 0.4 GB (quiet day) to 1.3 GB (very active day). Its files are hard
+links into staging (below), so only the archive days older than staging
+(days 5–7) add space: ≈ 1.2–3.9 GB. The
+whole data directory: INTEGRATION.md "Resources". `FLARE_NRT_MIN_FREE_GB`
 (10 GB) is a hard floor (retention.py).
 
 Archive files are hard links to the staging copy when on the same
@@ -50,7 +51,7 @@ filesystem, so curation costs no extra space until staging is pruned.
 3. **What is deleted**: raw staging files 7 × 24 h after their slot
    (curation has run six times by then); archive days on the server after
    7 days; results after 400 days; model-input tensors after 2 days;
-   oldest first when the disk floor is hit (centella/retention.py).
+   oldest first when the disk floor is hit (flare_nrt/retention.py).
 
 Windows are contiguous so that, for positives and negatives alike, a
 training pair can be built with any baseline age up to 45 min — the
@@ -107,7 +108,7 @@ distribution for positives and negatives.
 
 ## Off-server copy
 
-The server keeps 7 days. Pull at least every few days to the long-term host, e.g.
-`rsync -a --ignore-existing <server>:/srv/centella/archive/ /path/to/archive/`
+The server keeps 7 days of archive. The maintainers pull it to a backup server; pull at least every few days to the long-term host, e.g.
+`rsync -a --ignore-existing <server>:/srv/flare-nrt/archive/ /path/to/archive/`
 and check `day.json` hashes after the copy. This is a maintainers' job
 (their backup pattern, not this repo's code).

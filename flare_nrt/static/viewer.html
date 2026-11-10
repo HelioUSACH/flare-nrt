@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Centella · visor</title>
+<title>flare-nrt · visor</title>
 <style>
 :root {
   --bg: #0d1016; --panel: #151a23; --panel2: #1b2130; --line: #273044; --text: #e6e9ef; --muted: #8b93a7;
@@ -67,7 +67,7 @@ kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4
 </head>
 <body>
 <header>
-  <h1><span>Centella</span> · visor retrospectivo</h1>
+  <h1><span>flare-nrt</span> · visor retrospectivo</h1>
   <div class="ctl">
     <label for="start">Inicio (UTC)</label><input type="datetime-local" id="start" step="120">
     <label for="span">Ventana</label>
@@ -86,7 +86,7 @@ kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4
     <div class="legend">
       <span><i style="background:var(--prob)"></i>probabilidad</span>
       <span><i style="background:var(--thr)"></i>umbral</span>
-      <span><i style="background:var(--ev)"></i>evento Centella</span>
+      <span><i style="background:var(--ev)"></i>evento flare-nrt</span>
       <span><i style="background:var(--c)"></i>GOES C</span><span><i style="background:var(--m)"></i>GOES M</span><span><i style="background:var(--x)"></i>GOES X</span>
       <span><i style="background:#4b5468"></i>sin resultado</span>
       <span class="muted">rueda: zoom · arrastrar: mover · doble clic: ver todo · <kbd>←</kbd><kbd>→</kbd> frame · <kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> 1 h · <kbd>espacio</kbd> reproducir · <kbd>J</kbd><kbd>K</kbd> evento</span>
@@ -114,8 +114,8 @@ kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4
   </div>
 
   <div class="lists">
-    <section class="panel"><h2>Eventos Centella</h2><div class="scroll"><table><thead><tr><th>inicio</th><th>pico</th><th>fin</th><th>p máx</th><th>GOES</th></tr></thead><tbody id="evs"></tbody></table></div></section>
-    <section class="panel"><h2>Flares GOES (≥ C)</h2><div class="scroll"><table><thead><tr><th>clase</th><th>inicio</th><th>pico</th><th>fin</th><th>Centella</th></tr></thead><tbody id="fls"></tbody></table></div></section>
+    <section class="panel"><h2>Eventos flare-nrt</h2><div class="scroll"><table><thead><tr><th>inicio</th><th>pico</th><th>fin</th><th>p máx</th><th>GOES</th></tr></thead><tbody id="evs"></tbody></table></div></section>
+    <section class="panel"><h2>Flares GOES (≥ C)</h2><div class="scroll"><table><thead><tr><th>clase</th><th>inicio</th><th>pico</th><th>fin</th><th>flare-nrt</th></tr></thead><tbody id="fls"></tbody></table></div></section>
   </div>
 </main>
 <script>
@@ -296,7 +296,7 @@ function draw() {
     const d = new Date(t), lbl = step >= 1440 * MIN || (d.getUTCHours() === 0 && d.getUTCMinutes() === 0) ? d.toISOString().slice(5, 10) : hm(t);
     ctx.fillText(lbl, x - 14, H - 6);
   }
-  // Centella events
+  // flare-nrt events
   ctx.fillStyle = c("--ev");
   S.events.forEach((e) => { const a = X(e.a - 0), b = X(e.b + 2 * MIN); if (b > PAD.l && a < W) ctx.fillRect(a, yt, Math.max(2, b - a), y0 - yt); });
   // GOES flares (top band)
@@ -372,7 +372,7 @@ function renderLists() {
   $("fls").innerHTML = S.flares.map((f) => {
     const big = f.class[0] !== "C", h = hitFor(f);
     return `<tr data-t="${f.a - 10 * MIN}"><td class="cls-${f.class[0]}">${f.class}</td><td>${fmt(f.a)}</td><td>${hm(f.pk)}</td><td>${hm(f.b)}</td><td>${h ? `<span class="hit">alerta ${hm(h.a)}</span>` : big ? '<span class="miss">no detectado</span>' : '<span class="muted">—</span>'}</td></tr>`;
-  }).join("") || `<tr><td colspan="5" class="muted">sin flares GOES (configura CENTELLA_FLARES_CSV o corre la curación)</td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="muted">sin flares GOES (configura FLARE_NRT_FLARES_CSV o corre la curación)</td></tr>`;
   document.querySelectorAll("tbody tr[data-t]").forEach((tr) => tr.addEventListener("click", () => { play(false); seek(+tr.dataset.t); }));
 }
 

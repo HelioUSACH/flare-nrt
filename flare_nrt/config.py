@@ -1,5 +1,5 @@
-"""Settings. Every value comes from an environment variable (``CENTELLA_*``) with a
-default under ``CENTELLA_DATA_DIR``; nothing assumes a particular machine."""
+"""Settings. Every value comes from an environment variable (``FLARE_NRT_*``) with a
+default under ``FLARE_NRT_DATA_DIR``; nothing assumes a particular machine."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from pathlib import Path
 def _env(name: str, default: str) -> str:
     """An unset or empty variable means the default (.env.example lists
     every setting with an empty value)."""
-    return os.environ.get(f"CENTELLA_{name}") or default
+    return os.environ.get(f"FLARE_NRT_{name}") or default
 
 
 @dataclass
 class Settings:
     data_dir: Path = field(default_factory=lambda: Path(_env("DATA_DIR", "./var")))
     weights: Path = field(default_factory=lambda: Path(_env("WEIGHTS", "./models/deployment_ensemble_thr058.pt")))
-    # pinned: the release asset (centella/fetch_weights.py); anything else is refused
+    # pinned: the release asset (flare_nrt/fetch_weights.py); anything else is refused
     weights_sha256: str = field(default_factory=lambda: _env(
         "WEIGHTS_SHA256", "d3b850e3ec3d2670f4cb9327c397f7391ed1b082d2b6d154bca1b57626676006"))
     norm_stats: Path = field(default_factory=lambda: Path(_env("NORM_STATS", "./metadata/global_norm_stats.json")))
@@ -45,7 +45,7 @@ class Settings:
     # a slot still missing this long after a later slot has arrived is skipped
     skip_after_min: int = field(default_factory=lambda: int(_env("SKIP_AFTER_MIN", "12")))
     http_timeout: float = field(default_factory=lambda: float(_env("HTTP_TIMEOUT", "15")))
-    torch_threads: int = field(default_factory=lambda: int(_env("TORCH_THREADS", "4")))
+    torch_threads: int = field(default_factory=lambda: int(_env("TORCH_THREADS", "2")))
 
     # freshness (the portal's manifest uses stale_after: 10m). A frame whose
     # newest T_OBS is older than max_input_age_sec when processed is skipped
@@ -54,7 +54,7 @@ class Settings:
     max_input_age_sec: int = field(default_factory=lambda: int(_env("MAX_INPUT_AGE_SEC", "900")))
 
     # retention
-    staging_days: float = field(default_factory=lambda: float(_env("STAGING_DAYS", "7")))
+    staging_days: float = field(default_factory=lambda: float(_env("STAGING_DAYS", "4")))
     tensors_days: float = field(default_factory=lambda: float(_env("TENSORS_DAYS", "2")))
     gradcam_days: float = field(default_factory=lambda: float(_env("GRADCAM_DAYS", "2")))
     gradcam_alert_days: float = field(default_factory=lambda: float(_env("GRADCAM_ALERT_DAYS", "400")))

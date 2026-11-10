@@ -1,9 +1,9 @@
 import datetime as dt
 import json
 
-from centella.curate import label, merge, negative_blocks
-from centella.goes import Flare, class_flux, parse_swpc
-from centella.validate import evaluate
+from flare_nrt.curate import label, merge, negative_blocks
+from flare_nrt.goes import Flare, class_flux, parse_swpc
+from flare_nrt.validate import evaluate
 
 D = dt.datetime(2026, 7, 1, tzinfo=dt.timezone.utc)
 M = dt.timedelta(minutes=1)
@@ -66,9 +66,9 @@ def test_evaluate_counts_hits_c_runs_and_false_alarms():
 
 
 def test_baseline_rule_at_matched_false_alarms():
-    from centella.validate import aia131_rule
+    from flare_nrt.validate import aia131_rule
 
-    # 2 h of slots; an M flare at 60–70 min. Centella: alert on it only.
+    # 2 h of slots; an M flare at 60–70 min. flare-nrt: alert on it only.
     # The 131 Å excess: high on the flare, but also a bump at 20 min (no flare).
     rows = []
     for i in range(60):
@@ -88,7 +88,7 @@ def test_baseline_rule_at_matched_false_alarms():
 
 
 def test_alternation_index():
-    from centella.validate import alternation
+    from flare_nrt.validate import alternation
 
     def rows(ps):
         return [{"slot": (D + 2 * i * M).strftime("%Y-%m-%dT%H:%M:%SZ"), "status": "ok", "probability": p}
@@ -103,7 +103,7 @@ def test_hek_flare_list(monkeypatch, tmp_path):
     """HEK's column search, paged (``overmax``); entries without a class dropped."""
     import requests
 
-    from centella import goes
+    from flare_nrt import goes
 
     pages = [
         {"overmax": True, "result": [
@@ -142,7 +142,7 @@ def test_hek_flare_list(monkeypatch, tmp_path):
 def test_hek_positions_come_from_lmsal_matched_by_peak(monkeypatch, tmp_path):
     import requests
 
-    from centella import goes
+    from flare_nrt import goes
 
     swpc = [  # SWPC: class and times; one with its own position, one with (0, 0) = none
         {"event_starttime": "2026-07-04T11:38:00", "event_peaktime": "2026-07-04T11:52:00",
@@ -184,7 +184,7 @@ def test_hek_positions_come_from_lmsal_matched_by_peak(monkeypatch, tmp_path):
 def test_location_errors_against_catalogue():
     from dataclasses import replace
 
-    from centella.validate import location_errors
+    from flare_nrt.validate import location_errors
 
     f1 = replace(fl(60, 64, 70, "M2.0"), hpc=(500.0, -200.0))
     f2 = replace(fl(200, 204, 210, "M1.0"), hpc=None)
@@ -194,5 +194,5 @@ def test_location_errors_against_catalogue():
                      "probability": p, "location": {"centroid_arcsec": loc, "on_limb": False}})
     r = location_errors(rows, [f1, f2])
     assert r["n_compared"] == 1 and r["mx_detected_without_position"] == 1
-    assert r["flares"][0]["centella"] == [520, -210]           # the highest-probability alert
+    assert r["flares"][0]["flare_nrt"] == [520, -210]           # the highest-probability alert
     assert abs(r["median_arcsec"] - 22.4) < 0.1 and r["within_60_arcsec"] == 1.0

@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# never commit data, weights or outputs
+var/
+models/
+metadata/
+data/
+output*/
+logs/
+cache/
+*.pt
+*.pth
+*.fits
+*.fits.gz
+*.npz
+*.jsonl
+*.log
+*.ipynb
+.env
+
+# the stored snapshot for the end-to-end test (checklist C.12) is the one exception
+!tests/fixtures/*.npz

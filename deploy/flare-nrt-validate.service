@@ -1,0 +1,19 @@
+# Example unit: weekly operational validation against GOES (last 7 days).
+[Unit]
+Description=flare-nrt weekly validation vs GOES
+
+[Service]
+Type=oneshot
+User=flare-nrt
+Group=flare-nrt
+WorkingDirectory=/opt/flare-nrt
+EnvironmentFile=/etc/flare-nrt/flare-nrt.env
+ExecStart=/bin/bash -c '/opt/flare-nrt/.venv/bin/python -m flare_nrt.validate \
+  --start "$(date -u -d "7 days ago" +%%F)" --end "$(date -u -d yesterday +%%F)" \
+  --out "/srv/flare-nrt/reports/validation_$(date -u +%%F).json"'
+Nice=10
+CPUQuota=100%
+MemoryMax=1G
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/flare-nrt

@@ -2,9 +2,9 @@
 an archive day for retraining (format: docs/archive-format.md), then let
 retention free the staging copy.
 
-    python -m centella.curate                    # every uncurated day older than 1 day
-    python -m centella.curate --day 2026-10-25   # one day
-    python -m centella.curate --flares-csv F.csv # labels from a file instead of SWPC
+    python -m flare_nrt.curate                    # every uncurated day older than 1 day
+    python -m flare_nrt.curate --day 2026-10-25   # one day
+    python -m flare_nrt.curate --flares-csv F.csv # labels from a file instead of SWPC
 
 What is kept (full 4-channel slots, raw FITS):
 
@@ -45,9 +45,9 @@ from .model import sha256
 from .retention import Retention, archive_day_dir, is_curated
 from .store import ResultStore, write_json_atomic
 
-log = logging.getLogger("centella.curate")
+log = logging.getLogger("flare_nrt.curate")
 
-SCHEMA = "centella-archive/1"
+SCHEMA = "flare-nrt-archive/1"
 NEG_CLEARANCE = dt.timedelta(minutes=60)
 FRAME_FIELDS = [
     "slot", "status", "qc", "probability", "alert", "event_id", "model_version", "lag_min",

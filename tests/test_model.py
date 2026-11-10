@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from centella.model import Ensemble, WeightsError, clean_keys, sha256
+from flare_nrt.model import Ensemble, WeightsError, clean_keys, sha256
 
 
 def test_clean_keys_maps_training_head():
@@ -40,7 +40,7 @@ def test_gradcam_shape_and_range(stand_in_weights):
 
 
 def test_fetch_weights_refuses_a_wrong_file(tmp_path, monkeypatch):
-    from centella import fetch_weights
+    from flare_nrt import fetch_weights
 
     class R:
         def __init__(self, body):
@@ -67,8 +67,8 @@ def test_fetch_weights_refuses_a_wrong_file(tmp_path, monkeypatch):
 
 
 def test_pinned_sha_is_the_config_default():
-    from centella.config import Settings
-    from centella.fetch_weights import WEIGHTS_SHA256
+    from flare_nrt.config import Settings
+    from flare_nrt.fetch_weights import WEIGHTS_SHA256
 
     assert Settings().weights_sha256 == WEIGHTS_SHA256
 
@@ -76,10 +76,10 @@ def test_pinned_sha_is_the_config_default():
 def test_empty_env_values_mean_defaults(monkeypatch):
     import pathlib
 
-    from centella.config import Settings
+    from flare_nrt.config import Settings
 
     for line in pathlib.Path(".env.example").read_text().splitlines():
-        if line.startswith("CENTELLA_"):
+        if line.startswith("FLARE_NRT_"):
             monkeypatch.setenv(line.split("=")[0], "")
     s = Settings()
-    assert s.threshold == 0.80 and s.staging_days == 7 and s.max_input_age_sec == 900
+    assert s.threshold == 0.80 and s.staging_days == 4 and s.torch_threads == 2 and s.max_input_age_sec == 900

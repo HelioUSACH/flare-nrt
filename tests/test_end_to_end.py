@@ -1,6 +1,6 @@
 """Stored synthetic input → full inference path → results, events, API,
 curated archive. Uses the tiny stand-in ensemble (conftest); the real-weights
-check is tests/test_real_weights.py (skipped unless CENTELLA_REAL_WEIGHTS is set)."""
+check is tests/test_real_weights.py (skipped unless FLARE_NRT_REAL_WEIGHTS is set)."""
 
 import datetime as dt
 import json
@@ -8,12 +8,12 @@ import json
 from conftest import T0, write_slot
 from fastapi.testclient import TestClient
 
-from centella import curate
-from centella.goes import Flare
-from centella.grid import CADENCE, iso, parse_iso
-from centella.loop import run
-from centella.server import create_app, live_status
-from centella.store import ResultStore, read_events, read_json, write_json_atomic
+from flare_nrt import curate
+from flare_nrt.goes import Flare
+from flare_nrt.grid import CADENCE, iso, parse_iso
+from flare_nrt.loop import run
+from flare_nrt.server import create_app, live_status
+from flare_nrt.store import ResultStore, read_events, read_json, write_json_atomic
 
 
 def _make_day(cfg, n=16, bad=(5,), flare_from=12):
@@ -102,9 +102,9 @@ def test_api_contract_and_freshness(cfg):
               "model_version", "weights_sha256", "server_time"):
         assert k in s, k
     assert s["state"] in {"quiet", "onset", "active", "decay"}
-    assert s["timestamp"].endswith("Z") and s["server_time"].endswith("Z") and s["model"] == "Centella"
+    assert s["timestamp"].endswith("Z") and s["server_time"].endswith("Z") and s["model"] == "flare-nrt"
     assert {"slot", "status", "reason", "inputs"} <= set(s["last_frame"])
-    assert "severity" not in s            # never sent (exploratory in 1.x, removed)
+    assert "severity" not in s            # never sent (exploratory in early internal versions, removed)
     assert client.get("/api/events").status_code == 200
     assert "points" in client.get("/api/results?hours=168").json()
     assert "coverage_24h" in client.get("/api/health").json()
@@ -129,8 +129,8 @@ def test_live_status_rules():
 
 
 def test_missing_slot_is_skipped_once_later_slots_arrive(cfg):
-    from centella.loop import should_skip
-    from centella.source import ReplaySource
+    from flare_nrt.loop import should_skip
+    from flare_nrt.source import ReplaySource
 
     slots = [T0 + i * CADENCE for i in range(4)]
     for s in slots[1:]:
@@ -153,7 +153,7 @@ def test_curation_builds_archive_day(cfg):
     s = curate.curate_day(cfg, day, [f], "test", True)
     out = cfg.archive_dir / "2026" / "10" / "20"
     assert (out / "day.json").exists() and (out / "frames.csv").exists() and (out / "flares.csv").exists()
-    assert s["schema"] == "centella-archive/1"
+    assert s["schema"] == "flare-nrt-archive/1"
     assert s["slots"]["kept_by_reason"].get("flare", 0) == 16  # raw kept even for the QC-rejected slot
     assert len(s["files"]) == 4 * s["slots"]["kept"]
     assert all(len(h) == 64 for h in s["files"].values())
@@ -182,7 +182,7 @@ def test_channel_previews(cfg):
 
 
 def test_mostrecent_is_filed_under_its_own_slot(cfg, tmp_path):
-    from centella.source import LiveSource
+    from flare_nrt.source import LiveSource
 
     slot = T0 + 3 * CADENCE
     src_dir = tmp_path / "jsoc"
@@ -211,7 +211,7 @@ def test_mostrecent_is_filed_under_its_own_slot(cfg, tmp_path):
 
 
 def test_staging_hours_keeps_only_recent_files(cfg):
-    from centella.retention import Retention
+    from flare_nrt.retention import Retention
 
     cfg.staging_hours = 1
     old, new = T0, T0 + dt.timedelta(hours=3)
@@ -223,7 +223,7 @@ def test_staging_hours_keeps_only_recent_files(cfg):
 
 
 def test_mostrecent_stands_for_every_slot_within_90s():
-    from centella.source import slots_for
+    from flare_nrt.source import slots_for
 
     s = T0
     assert slots_for(s + dt.timedelta(seconds=10)) == [s]                     # 110 s from the next
@@ -235,7 +235,7 @@ def test_mostrecent_stands_for_every_slot_within_90s():
 def test_mostrecent_off_slot_fills_both_slots(cfg, tmp_path):
     from conftest import write_fits
 
-    from centella.source import LiveSource
+    from flare_nrt.source import LiveSource
 
     t = T0 + dt.timedelta(seconds=50)       # stands for T0 (50 s) and T0+2 min (70 s)
     blobs = {}
@@ -264,8 +264,8 @@ def test_mostrecent_off_slot_fills_both_slots(cfg, tmp_path):
 
 
 def test_cold_start_does_not_wait_for_slots_before_start(cfg):
-    from centella.loop import should_skip
-    from centella.source import ReplaySource
+    from flare_nrt.loop import should_skip
+    from flare_nrt.source import ReplaySource
 
     start = T0 + 10 * CADENCE
     write_slot(cfg.staging_dir, start)
@@ -293,8 +293,8 @@ def test_previews_before_the_first_result(cfg):
     assert r.status_code == 200 and r.headers["X-Observation-Time"] == iso(later)
 
 
-def test_retention_keeps_7_days_of_fits_2_of_tensors(cfg):
-    from centella.retention import Retention
+def test_retention_keeps_4_days_of_fits_2_of_tensors(cfg):
+    from flare_nrt.retention import Retention
 
     now = dt.datetime(2026, 10, 28, 12, 0, tzinfo=dt.timezone.utc)
 
@@ -304,9 +304,9 @@ def test_retention_keeps_7_days_of_fits_2_of_tensors(cfg):
         return p
 
     keep, drop = [], []
-    for days in (0, 7, 8):
+    for days in (0, 4, 5):                      # FLARE_NRT_STAGING_DAYS default: 4
         d = now - dt.timedelta(days=days)
-        (keep if days <= 7 else drop).append(touch(cfg.staging_dir / f"{d:%Y%m%d}" / f"AIA{d:%Y%m%d}_1200_0131.fits"))
+        (keep if days <= 4 else drop).append(touch(cfg.staging_dir / f"{d:%Y%m%d}" / f"AIA{d:%Y%m%d}_1200_0131.fits"))
     for days in (2, 3):
         d = now - dt.timedelta(days=days)
         (keep if days <= 2 else drop).append(touch(cfg.tensors_dir / f"{d:%Y%m%d}" / "1200.npz"))
@@ -323,9 +323,9 @@ def test_display_endpoints(cfg):
 
     from PIL import Image
 
-    from centella.loop import Processor
-    from centella.model import Ensemble
-    from centella.source import ReplaySource
+    from flare_nrt.loop import Processor
+    from flare_nrt.model import Ensemble
+    from flare_nrt.source import ReplaySource
 
     now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
     t0 = now - dt.timedelta(minutes=now.minute % 2) - 9 * CADENCE
@@ -361,7 +361,7 @@ def test_display_endpoints(cfg):
 
 
 def test_retrospective_viewer(cfg, tmp_path):
-    """A past period replayed from FITS kept elsewhere (CENTELLA_FITS_DIRS),
+    """A past period replayed from FITS kept elsewhere (FLARE_NRT_FITS_DIRS),
     browsed by date: range, series/events/flares windows, one frame's
     detail, its images, the alert Grad-CAM, the viewer page."""
     fits = tmp_path / "month"
@@ -416,8 +416,8 @@ def test_replay_resume_skips_done_slots(cfg, tmp_path):
 def test_live_flares_add_swpc_recent_list(cfg, monkeypatch):
     """Live: the curated archive covers up to yesterday; SWPC's 7-day list
     fills the recent days (and its failure is not the API's)."""
-    import centella.server as srv
-    from centella.goes import Flare
+    import flare_nrt.server as srv
+    from flare_nrt.goes import Flare
 
     now = dt.datetime.now(dt.timezone.utc).replace(second=0, microsecond=0)
     recent = Flare(now - dt.timedelta(hours=3), now - dt.timedelta(hours=2, minutes=50),

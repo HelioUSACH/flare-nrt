@@ -1,8 +1,8 @@
 """The detection loop: every poll, download what JSOC has published, then
 process every slot in order, exactly once.
 
-    python -m centella.loop                 # live (systemd: deploy/centella-loop.service)
-    python -m centella.loop --replay DIR    # existing FITS, same code path
+    python -m flare_nrt.loop                 # live (systemd: deploy/flare-nrt-loop.service)
+    python -m flare_nrt.loop --replay DIR    # existing FITS, same code path
 
 Per slot: QC → preprocess → baseline from t−L…(n_baseline frames) → ensemble
 → alert rule → event merging → results/YYYYMMDD.jsonl (+ status.json for
@@ -34,7 +34,7 @@ from .retention import Retention
 from .source import LiveSource, ReplaySource
 from .store import ResultStore, append_event, read_json, write_json_atomic
 
-log = logging.getLogger("centella.loop")
+log = logging.getLogger("flare_nrt.loop")
 
 MISSING = "missing"
 
@@ -48,7 +48,7 @@ def input_age_s(inputs: dict | None, now: dt.datetime) -> float | None:
 def aia131_excess(cur, bls) -> float | None:
     """Relative rise of the disk-integrated 131 Å count rate over the same
     baseline frames the model uses: Σ(cur)/mean(Σ(bl)) − 1. The input of the
-    non-neural baseline rule in ``centella.validate`` (docs/model-card.md)."""
+    non-neural baseline rule in ``flare_nrt.validate`` (docs/model-card.md)."""
     import numpy as np
 
     if cur is None or not bls or any(b is None for b in bls):
@@ -195,7 +195,7 @@ class Processor:
         open_ev = self.tracker.current
         status = {
             "status": "running",
-            "model": "Centella",
+            "model": "flare-nrt",
             "model_version": __version__,
             "weights_sha256": self.ens.meta.get("sha256"),
             "timestamp": row["made_at"],          # when the result was made (portal: issued)
@@ -263,7 +263,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
                      cfg.archive_every_sec, cfg.archive_budget_sec) if live \
         else ReplaySource(replay_dir)
     proc = Processor(cfg, ens, src, live)
-    log.info("Centella %s | L=%d min, n_bl=%d, thr=%.2f, merge=%d min | %s | weights %s",
+    log.info("flare-nrt %s | L=%d min, n_bl=%d, thr=%.2f, merge=%d min | %s | weights %s",
              __version__, cfg.lag_min, cfg.n_baseline, cfg.threshold, cfg.merge_gap_min,
              "live" if live else f"replay {replay_dir}", ens.meta["sha256"][:12])
 
@@ -335,7 +335,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--replay", help="process existing FITS in this directory, then exit")
-    ap.add_argument("--data-dir", help="override CENTELLA_DATA_DIR")
+    ap.add_argument("--data-dir", help="override FLARE_NRT_DATA_DIR")
     ap.add_argument("--resume", action="store_true", help="replay: skip slots already in results/")
     ap.add_argument("--no-gradcam", action="store_true", help="replay: don't save Grad-CAM of alerting frames")
     a = ap.parse_args(argv)

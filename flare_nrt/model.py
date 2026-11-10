@@ -67,7 +67,7 @@ class Ensemble:
             raise WeightsError(f"SHA-256 mismatch for {path.name}: {digest}")
         device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         if not expected_sha256:
-            raise WeightsError("set CENTELLA_WEIGHTS_SHA256: weights are never loaded unverified")
+            raise WeightsError("set FLARE_NRT_WEIGHTS_SHA256: weights are never loaded unverified")
         try:
             ckpt = torch.load(path, map_location="cpu", weights_only=True)
         except Exception as e:

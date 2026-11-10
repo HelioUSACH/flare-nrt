@@ -2,7 +2,7 @@
 Listens on 127.0.0.1 only; no authentication from localhost. The full field
 tables are in INTEGRATION.md.
 
-    uvicorn centella.server:app --host 127.0.0.1 --port 5050
+    uvicorn flare_nrt.server:app --host 127.0.0.1 --port 5050
 
 ``/api/status`` keeps the fields the portal's adapter reads (``live_status``,
 ``timestamp``, ``seconds_since_update``, ``probability``, ``flare_detected``,
@@ -77,7 +77,7 @@ def _png(data: bytes, slot: dt.datetime, max_age: int = 60) -> Response:
 
 def create_app(cfg: Settings | None = None) -> FastAPI:
     cfg = cfg or Settings()
-    app = FastAPI(title="Centella", version=__version__)
+    app = FastAPI(title="flare-nrt", version=__version__)
 
     def _rows(since: dt.datetime, until: dt.datetime) -> list[dict]:
         store = ResultStore(cfg.results_dir)
@@ -167,7 +167,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     fits_index: dict = {"built": 0.0, "paths": {}}
 
     def _indexed(name: str) -> Path | None:
-        """FITS in ``CENTELLA_FITS_DIRS`` (e.g. the month a replay ran on),
+        """FITS in ``FLARE_NRT_FITS_DIRS`` (e.g. the month a replay ran on),
         by file name; the index is rebuilt at most every 10 min."""
         if not cfg.fits_dirs:
             return None
@@ -218,7 +218,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     @app.get("/api/frames")
     def frames(hours: float = Query(6, gt=0, le=168), start: str | None = None, end: str | None = None):
         """Recent slots with what can be shown for each: AIA images
-        (``/api/image/{wave}.png?slot=``) while the FITS are kept (7 days),
+        (``/api/image/{wave}.png?slot=``) while the FITS are kept (4 days by default),
         Grad-CAM (``/api/gradcam/{slot}.png``) while it is kept (2 days;
         alerting frames 400 days). ``start``/``end`` (ISO, ≤ 7 days apart)
         select any window."""
@@ -350,7 +350,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     @app.get("/api/flares")
     def flares(start: str | None = None, end: str | None = None, days: float = Query(3, gt=0, le=40)):
         """GOES flares (C and above) in a window, for comparison:
-        ``CENTELLA_FLARES_CSV`` if set; else the curated archive's lists plus
+        ``FLARE_NRT_FLARES_CSV`` if set; else the curated archive's lists plus
         SWPC's 7-day list when the window reaches the last 7 days."""
         since, until = _window(start, end, days, 40)
         pool = {f.flare_id: f for f in _flares()}
@@ -368,7 +368,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
     def viewer():
         """Retrospective viewer (internal): scrub through the results, AIA
         channels, differences, Grad-CAM and GOES flares of any period."""
-        return HTMLResponse((resources.files("centella") / "static" / "viewer.html").read_text(encoding="utf-8"))
+        return HTMLResponse((resources.files("flare_nrt") / "static" / "viewer.html").read_text(encoding="utf-8"))
 
     # -- operations --------------------------------------------------------
     @app.get("/api/health")

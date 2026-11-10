@@ -95,7 +95,7 @@ def read_csv(path: Path) -> list[Flare]:
 def fetch_swpc(url: str, timeout: float = 30) -> list[Flare]:
     import requests
 
-    r = requests.get(url, timeout=timeout, headers={"User-Agent": "Centella (HelioUSACH)"})
+    r = requests.get(url, timeout=timeout, headers={"User-Agent": "flare-nrt (HelioUSACH)"})
     r.raise_for_status()
     return parse_swpc(r.json())
 
@@ -148,7 +148,7 @@ def _hek_search(frm: str, start: dt.datetime, end: dt.datetime, timeout: float) 
             "return": "event_starttime,event_peaktime,event_endtime,fl_goescls,hpc_x,hpc_y",
             "result_limit": 500, "page": page,
         }
-        r = requests.get(HEK_URL, params=params, timeout=timeout, headers={"User-Agent": "Centella (HelioUSACH)"})
+        r = requests.get(HEK_URL, params=params, timeout=timeout, headers={"User-Agent": "flare-nrt (HelioUSACH)"})
         r.raise_for_status()
         js = r.json()
         results += js.get("result", [])
@@ -182,7 +182,7 @@ def fetch_hek(start: dt.datetime, end: dt.datetime, timeout: float = 60, positio
 
 
 def main(argv=None) -> None:
-    """python -m centella.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv"""
+    """python -m flare_nrt.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv"""
     import argparse
 
     ap = argparse.ArgumentParser(description="GOES flare list (SWPC, via HEK) for a past period → CSV")
