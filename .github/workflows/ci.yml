@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+
+      # CPU-only torch, as on the portal's server (README "Install")
+      - name: Install dependencies
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
+          pip install -r requirements.lock.txt
+          pip install -r requirements-dev.txt
+          pip install -e . --no-deps
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      # offline, CPU, a tiny stand-in ensemble; the real-weights tests skip
+      - name: Tests
+        run: pytest -q
+
+      - name: The old name is gone (CHANGELOG records the rename)
+        run: "! git grep -n -i 'cent''ella' -- ':!CHANGELOG.md'"

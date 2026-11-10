@@ -9,13 +9,13 @@
 - a flare is **evaluable** if at least 2 ``ok`` slots fall in
   [tstart − 10 min, tpeak].
 
-    python -m centella.validate --start 2026-10-27 --end 2026-11-03 [--flares-csv F.csv]
+    python -m flare_nrt.validate --start 2026-10-27 --end 2026-11-03 [--flares-csv F.csv]
 
 The report also scores the named baseline, ``aia131_rise``: no network, the
 same input frames — alert when the disk-integrated 131 Å count rate is up by
 ≥ k over the same baseline frames (``aia131_excess`` in each result row),
 with k the lowest value whose false alarms on the period do not exceed
-Centella's. Same rules, same flares: the difference is what the network adds.
+flare-nrt's. Same rules, same flares: the difference is what the network adds.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ def aia131_rule(rows: list[dict], flares: list[Flare], max_false_alarms: int, me
                 reverse=True)
     if not xs:
         return {"rule": "aia131_rise", "available": False,
-                "why": "no aia131_excess in these rows (results from before 2.1.0: replay again)"}
+                "why": "no aia131_excess in these rows (results from an early internal version: replay again)"}
     best = None
     lo, hi = 0, min(len(xs), 5000) - 1      # FA grows as k falls: binary search on the sorted values
     while lo <= hi:
@@ -116,11 +116,11 @@ def aia131_rule(rows: list[dict], flares: list[Flare], max_false_alarms: int, me
 
 
 def location_errors(rows: list[dict], flares: list[Flare]) -> dict:
-    """Centella's location against the catalogue position, per detected M/X
+    """flare-nrt's location against the catalogue position, per detected M/X
     flare that has both: the location of the highest-probability alerting
     slot in [tstart − 10 min, tend + 5 min] vs the flare's ``hpc``
     (helioprojective arcsec; LMSAL "SSW Latest Events" via HEK, see
-    ``centella.goes.fetch_hek``). Distances are in arcsec on the image plane
+    ``flare_nrt.goes.fetch_hek``). Distances are in arcsec on the image plane
     (≈ 0.73 Mm per arcsec at disk centre)."""
     big = [f for f in flares if f.flux >= class_flux("M1.0")]
     alerting = [(parse_iso(r["slot"]), r) for r in rows
@@ -133,7 +133,7 @@ def location_errors(rows: list[dict], flares: list[Flare]) -> dict:
         r = max(cand, key=lambda r: r.get("probability") or 0)
         x, y = r["location"]["centroid_arcsec"]
         d = ((x - f.hpc[0]) ** 2 + (y - f.hpc[1]) ** 2) ** 0.5
-        per.append({"flare": f.flare_id, "class": f.fclass, "slot": r["slot"], "centella": [round(x), round(y)],
+        per.append({"flare": f.flare_id, "class": f.fclass, "slot": r["slot"], "flare_nrt": [round(x), round(y)],
                     "catalogue": [round(f.hpc[0]), round(f.hpc[1])], "distance_arcsec": round(d, 1),
                     "on_limb": bool(r["location"].get("on_limb"))})
     ds = sorted(p["distance_arcsec"] for p in per)
@@ -152,7 +152,7 @@ def location_errors(rows: list[dict], flares: list[Flare]) -> dict:
 
 
 def alternation(rows: list[dict], p_max: float = 0.3, min_step: float = 0.02) -> dict:
-    """The low-probability 2-frame alternation seen in 1.x: among
+    """The low-probability 2-frame alternation seen in early internal versions: among
     consecutive ``ok`` slots below ``p_max``, the fraction of steps that
     reverse the previous step's sign with both steps ≥ ``min_step``. A
     random walk gives ~0.5 of reversals overall; a strict up-down-up

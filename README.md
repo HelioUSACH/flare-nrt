@@ -1,6 +1,6 @@
-# flare-nrt — Centella
+# flare-nrt
 
-**Centella** detects solar flares in near real time on SDO/AIA synoptic
+**flare-nrt** detects solar flares in near real time on SDO/AIA synoptic
 images. It produces the `usach.flare.nrt` product of
 [Clima Espacial USACH](https://github.com/HelioUSACH/clima-espacial). It
 runs as an internal service on the portal's server, and the portal polls
@@ -29,21 +29,21 @@ pip install -e . --no-deps
 ## 2. Fetch the weights
 
 ```bash
-python -m centella.fetch_weights       # → models/ and metadata/, SHA-256 verified
+python -m flare_nrt.fetch_weights       # → models/ and metadata/, SHA-256 verified
 ```
 
 This downloads two files from the GitHub release:
 `deployment_ensemble_thr058.pt` (214 MB) and `global_norm_stats.json`.
-Their SHA-256 is pinned in `centella/fetch_weights.py`. The default of
-`CENTELLA_WEIGHTS_SHA256` is the same value, so the service refuses any
+Their SHA-256 is pinned in `flare_nrt/fetch_weights.py`. The default of
+`FLARE_NRT_WEIGHTS_SHA256` is the same value, so the service refuses any
 other file. A file is loaded with `torch.load(weights_only=True)` only
 after its hash checks.
 
 ## 3. Run
 
 ```bash
-python -m centella.loop                                    # live loop (JSOC mostrecent/)
-uvicorn centella.server:app --host 127.0.0.1 --port 5050   # the API the portal polls
+python -m flare_nrt.loop                                    # live loop (JSOC mostrecent/)
+uvicorn flare_nrt.server:app --host 127.0.0.1 --port 5050   # the API the portal polls
 curl -s 127.0.0.1:5050/api/status                          # live_status, state, probability …
 ```
 
@@ -54,10 +54,10 @@ is an environment variable (`.env.example`). Logs go to stdout/stderr.
 Other jobs:
 
 ```bash
-python -m centella.curate                                  # daily: archive + labels + retention
-python -m centella.validate --start 2026-10-21 --end 2026-10-27   # vs GOES and vs the baseline rule
-python -m centella.loop --replay /path/to/fits             # replay stored FITS through the same code
-python -m centella.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv   # GOES list of a past period
+python -m flare_nrt.curate                                  # daily: archive + labels + retention
+python -m flare_nrt.validate --start 2026-10-21 --end 2026-10-27   # vs GOES and vs the baseline rule
+python -m flare_nrt.loop --replay /path/to/fits             # replay stored FITS through the same code
+python -m flare_nrt.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv   # GOES list of a past period
 ```
 
 `http://127.0.0.1:5050/viewer` is a retrospective viewer. It lets you
@@ -71,7 +71,7 @@ FITS.
 ```bash
 ruff check .
 pytest                                                      # offline, CPU, ~3 min
-CENTELLA_REAL_WEIGHTS=models/deployment_ensemble_thr058.pt pytest tests/test_snapshot.py
+FLARE_NRT_REAL_WEIGHTS=models/deployment_ensemble_thr058.pt pytest tests/test_snapshot.py
 ```
 
 The plain `pytest` run uses a tiny stand-in ensemble. The second command
@@ -90,7 +90,7 @@ the thesis pipeline on AIA level-1 images: solar cycle 24 for training,
 ## Layout
 
 ```
-centella/  config, grid (2-min slots), source (JSOC), qc, preprocess,
+flare_nrt/  config, grid (2-min slots), source (JSOC), qc, preprocess,
            model (ensemble, SHA-256, Grad-CAM), detector (baseline, alert,
            events), loop, artifacts (tensors, Grad-CAM), localize, render,
            server (HTTP), store, retention, curate, goes, validate,

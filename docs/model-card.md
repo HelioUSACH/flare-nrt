@@ -1,8 +1,8 @@
-# Model card: `usach.flare.nrt` — Centella
+# Model card: `usach.flare.nrt` — flare-nrt
 
 ## Summary
 
-**Centella** is HelioUSACH's near-real-time detector of M- and X-class
+**flare-nrt** is HelioUSACH's near-real-time detector of M- and X-class
 solar flares in SDO/AIA synoptic images. It runs every 2 minutes and
 produces the `usach.flare.nrt` product of the Clima Espacial USACH portal.
 
@@ -34,7 +34,7 @@ Four AIA synoptic channels, 131, 171, 304 and 1600 Å, at 1024², level 1.5.
 - **Cadence:** 2-min slots.
 - **Latency:** T_OBS to availability ≈ 7–10 min (live, 2026-10-28).
 - **Rejected frames:** a frame is not used if it fails QC
-  (`centella/qc.py`: QUALITY flags other than the quicklook bit, exposure,
+  (`flare_nrt/qc.py`: QUALITY flags other than the quicklook bit, exposure,
   wavelength, blank or non-finite data, T_OBS > 90 s from the slot,
   channels > 120 s apart, sudden median jumps), or if its newest T_OBS is
   older than 15 min.
@@ -55,7 +55,7 @@ or smoothing: `raw_score` is the same number.
 - **Grad-CAM:** on each member's last block (`layer4`), averaged over the
   members.
 
-Code: `HelioUSACH/flare-nrt` (`centella/`).
+Code: `HelioUSACH/flare-nrt` (`flare_nrt/`).
 
 ## Training data
 
@@ -85,28 +85,28 @@ data.
   overlaps no C-or-larger flare in [start − 10, end + 30].
 - **Runs on C flares** are counted apart: neither hits nor false alarms.
 
-Code: `centella/validate.py`.
+Code: `flare_nrt/validate.py`.
 
 **Evaluation period: 2026-06-19 → 07-17.** This is a replay of the
 synoptic stream from the dated archive: 28.2 days, 95 % of slots usable,
 54 M/X and 161 C flares. The threshold was chosen on this month, so these
 numbers are optimistic.
 
-Replayed with Centella 2.3 (2026-11-03, `python -m centella.validate`;
+Replayed with internal version 2.3, the same model as 0.9.0 (2026-11-03, `python -m flare_nrt.validate`;
 GOES list and positions from HEK):
 
 | rule | M/X detected | ≥ M2 | M1–M2 | false alarms | time alerting | first alert vs GOES start / peak (median) |
 |---|---|---|---|---|---|---|
 | **GOES XRS event rule** (SWPC event start: the flux rise that defines the labels) | 100 % by construction | 100 % | 100 % | 0 by construction | — | 0 min (reference) |
-| **Centella 2.x**, L = 8, threshold 0.80 (2 of 3 or 3 of 3 baselines: identical) | **72 % (39/54)** | **100 % (22/22)** | **53 %** | **3** (≈ 1 per 9 days) | 1.4 % of slots | **+9 min / −1 min** |
-| **`aia131_rise`**: no network, same frames; alert when the disk-integrated 131 Å count rate is ≥ k above the same baseline frames (k = 4.9 %, set for Centella's 3 false alarms) | **98 % (53/54)** | | | 3 | 2.0 % of slots | +8 min / −2 min |
+| **flare-nrt** (internal 2.x = 0.9.0), L = 8, threshold 0.80 (2 of 3 or 3 of 3 baselines: identical) | **72 % (39/54)** | **100 % (22/22)** | **53 %** | **3** (≈ 1 per 9 days) | 1.4 % of slots | **+9 min / −1 min** |
+| **`aia131_rise`**: no network, same frames; alert when the disk-integrated 131 Å count rate is ≥ k above the same baseline frames (k = 4.9 %, set for flare-nrt's 3 false alarms) | **98 % (53/54)** | | | 3 | 2.0 % of slots | +8 min / −2 min |
 | `aia131_rise`, **out of sample**: k chosen on one half of the month (3.5 % / 4.9 %), scored on the other | **98 % (53/54)** | | | 5 | | |
-| Centella on the same halves (its threshold is fixed) | 72 % (39/54) | | | 3 | | |
+| flare-nrt on the same halves (its threshold is fixed) | 72 % (39/54) | | | 3 | | |
 | No-skill (climatology) | 0 alerts → 0 % | | | 0 | | |
 
 What this says against the baselines:
 
-- **Against GOES XRS:** Centella does **not** detect earlier. Its first
+- **Against GOES XRS:** flare-nrt does **not** detect earlier. Its first
   alert comes a median 9 min after the GOES start and 1 min before the
   GOES peak.
 - **Against `aia131_rise`: the network is beaten on detection.** On the
@@ -114,14 +114,14 @@ What this says against the baselines:
   rule on the disk-integrated 131 Å rise detects 14 more M/X flares.
   That holds out of sample:
   with k fitted on either half and scored on the other, the rule finds
-  53/54 with 5 false alarms, against Centella's 39/54 with 3. Physically,
+  53/54 with 5 false alarms, against flare-nrt's 39/54 with 3. Physically,
   131 Å includes Fe XXI (~10 MK flare plasma), so its disk-integrated
   light curve behaves like an EUV analogue of GOES XRS. The likely cause on
   the network's side is the baseline-age shortcut below, which forces its
   high threshold.
-- **What Centella adds is the location**, which a disk-integrated rule
+- **What flare-nrt adds is the location**, which a disk-integrated rule
   cannot give: for 36 detected M/X flares with a catalogue position, the
-  median distance between Centella's location and the catalogue's is
+  median distance between flare-nrt's location and the catalogue's is
   **14″**, and **89 %** are within 120″. The catalogue positions come from
   LMSAL's "SSW Latest Events" via HEK. They are also derived from AIA, but
   by an independent pipeline.
@@ -134,7 +134,7 @@ threshold 0.80. Result: 10/10 detected, 0 false alarms, 2 alerts on C
 flares.
 
 **Live:** no live-period numbers yet. The weekly validation unit
-(`centella-validate.timer`) will write them to `reports/`; this section
+(`flare-nrt-validate.timer`) will write them to `reports/`; this section
 will be updated from those reports.
 
 ## Known limitations
@@ -171,11 +171,11 @@ will be updated from those reports.
   reads `stale`.
 - **Detection is beaten by a simple 131 Å rule** (Performance). Until a
   retrained network does better, the detection claim is the rule's, and
-  Centella's is the location and the imaging confirmation.
+  flare-nrt's is the location and the imaging confirmation.
 - **Low-probability alternation (seen in 1.x), mild in 2.x.** 60 % of
   consecutive low-probability steps (p < 0.3, |Δp| ≥ 0.02) reverse sign,
   against ~50 % for noise and ~100 % for a strict 2-frame alternation
-  (calibration month, `alternation` in `centella.validate`).
+  (calibration month, `alternation` in `flare_nrt.validate`).
 - **Location: measured on one month only.** It is the brightest region of
   the 131 Å difference: median 14″ from the catalogue position, 89 % within
   120″ (36 M/X, calibration month). Limb flares and simultaneous flares in
@@ -188,6 +188,6 @@ will be updated from those reports.
   Campos (HelioUSACH).
 - **Deployment:** portal maintainers.
 - **Weights:** a GitHub release asset, with its SHA-256 pinned in
-  `centella/fetch_weights.py`.
+  `flare_nrt/fetch_weights.py`.
 - **Documents:** integration sheet `INTEGRATION.md`; archive format
   `docs/archive-format.md`.

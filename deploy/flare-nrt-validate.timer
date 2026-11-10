@@ -1,5 +1,5 @@
 [Unit]
-Description=Centella weekly validation
+Description=flare-nrt weekly validation
 
 [Timer]
 OnCalendar=Mon *-*-* 05:00:00 UTC

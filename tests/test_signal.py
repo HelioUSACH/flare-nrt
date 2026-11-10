@@ -6,12 +6,12 @@ import datetime as dt
 
 from conftest import T0, write_slot
 
-from centella.detector import EventTracker
-from centella.grid import CADENCE, iso
-from centella.loop import Processor, input_age_s, signal_state
-from centella.model import Ensemble
-from centella.qc import QualityControl
-from centella.source import ReplaySource
+from flare_nrt.detector import EventTracker
+from flare_nrt.grid import CADENCE, iso
+from flare_nrt.loop import Processor, input_age_s, signal_state
+from flare_nrt.model import Ensemble
+from flare_nrt.qc import QualityControl
+from flare_nrt.source import ReplaySource
 
 THR = 0.8
 
@@ -102,7 +102,7 @@ def test_live_frame_with_old_inputs_is_skipped_and_says_why(cfg):
 def test_channels_far_apart_are_not_one_snapshot(tmp_path):
     from conftest import write_fits
 
-    from centella.grid import file_name
+    from flare_nrt.grid import file_name
 
     paths = {}
     for w, dt_s in ((131, 0), (171, 10), (304, 0), (1600, 0)):

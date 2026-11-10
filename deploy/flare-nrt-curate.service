@@ -1,0 +1,20 @@
+# Example unit: daily curation of the previous UTC day(s) into the archive.
+[Unit]
+Description=flare-nrt daily curation (archive for retraining) + retention
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=flare-nrt
+Group=flare-nrt
+WorkingDirectory=/opt/flare-nrt
+EnvironmentFile=/etc/flare-nrt/flare-nrt.env
+ExecStart=/opt/flare-nrt/.venv/bin/python -m flare_nrt.curate
+Nice=10
+CPUQuota=100%
+MemoryMax=1G
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/flare-nrt
+PrivateTmp=true

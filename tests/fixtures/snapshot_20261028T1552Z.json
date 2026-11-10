@@ -1,5 +1,5 @@
 {
-  "what": "Real model input (8, 512, 512) float16 of AIA synoptic slot 2026-10-28T15:52:00Z (JSOC mostrecent, quicklook), built by centella.preprocess.build_input from the current frame and 2 of its 3 baselines (t-10, t-12; t-8 = 15:44 was missing). Quiet Sun.",
+  "what": "Real model input (8, 512, 512) float16 of AIA synoptic slot 2026-10-28T15:52:00Z (JSOC mostrecent, quicklook), built by flare_nrt.preprocess.build_input from the current frame and 2 of its 3 baselines (t-10, t-12; t-8 = 15:44 was missing). Quiet Sun.",
   "slot": "2026-10-28T15:52:00Z",
   "baseline_slots": ["2026-10-28T15:42:00Z", "2026-10-28T15:40:00Z"],
   "inputs": {

@@ -2,10 +2,10 @@
 (checklist A.3): nothing is written to its final path unless its SHA-256
 matches the one pinned here.
 
-    python -m centella.fetch_weights             # into ./models and ./metadata
-    python -m centella.fetch_weights --dest /srv/centella
+    python -m flare_nrt.fetch_weights             # into ./models and ./metadata
+    python -m flare_nrt.fetch_weights --dest /srv/flare-nrt
 
-The same SHA-256 is the default of ``CENTELLA_WEIGHTS_SHA256``; the loop
+The same SHA-256 is the default of ``FLARE_NRT_WEIGHTS_SHA256``; the loop
 refuses to load anything else."""
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-RELEASE = os.environ.get("CENTELLA_RELEASE_URL", "https://github.com/HelioUSACH/flare-nrt/releases/download/v2.5.0")
+RELEASE = os.environ.get("FLARE_NRT_RELEASE_URL", "https://github.com/HelioUSACH/flare-nrt/releases/download/v0.9.0")
 
 FILES = {
     # name: (subdirectory, SHA-256, size in bytes)
