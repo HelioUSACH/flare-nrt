@@ -43,7 +43,7 @@ FLARE_NRT_NORM_STATS=/srv/flare-nrt/metadata/global_norm_stats.json
 As root, in this order:
 
 ```bash
-git clone --branch v0.9.0 https://github.com/HelioUSACH/flare-nrt.git /opt/flare-nrt
+git clone --branch v1.0.0 https://github.com/HelioUSACH/flare-nrt.git /opt/flare-nrt
 cd /opt/flare-nrt && python3 -m venv .venv
 .venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
 .venv/bin/pip install -r requirements.lock.txt && .venv/bin/pip install --no-deps .

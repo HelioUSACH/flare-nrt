@@ -6,7 +6,7 @@
 | Kind | event (detection) |
 | Target (forecasts) | n/a |
 | Owner(s) | Nicolás Campos (HelioUSACH); supervisor and deployment: Víctor A. Pinto |
-| Repo, current tag | `HelioUSACH/flare-nrt`, `v0.9.0` (Python package `flare_nrt`). This sheet is updated with every release |
+| Repo, current tag | `HelioUSACH/flare-nrt`, `v1.0.0` (Python package `flare_nrt`). This sheet is updated with every release |
 | Run cadence | One result per AIA synoptic slot (2 min), as soon as its 4 channels and at least 2 of its 3 baseline frames are on disk |
 | Inputs | **AIA synoptic 131/171/304/1600 Å**, 1024², level 1.5 quicklook. Source: `https://jsoc1.stanford.edu/data/aia/synoptic/mostrecent/AIAsynoptic{0131,0171,0304,1600}.fits`, polled every 30 s. Gaps are filled from the dated archive (`…/synoptic/YYYY/MM/DD/HHH00/`), which lags real time; it is queried at most every 10 min. Typical latency from T_OBS to availability: ~7–10 min (measured on 2026-10-28; `data_latency_s` in every result). Public (NASA/SDO). ≈ 2.75 GB/day. **GOES flare list** (labels for curation and validation only, daily): `https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json`, public domain, < 50 kB/day |
 | New data the portal must collect | none (the portal already stores GOES XRS, which it compares itself) |
@@ -51,7 +51,7 @@ UTC with `Z`.
 | `last_frame` | object | | the newest slot the loop looked at, whether or not it produced a result: `slot`, `made_at`, `status` (`ok` / `missing` / `qc_reject` / `no_baseline` / `inputs_old`), `reason`, `qc` (QC reasons), `channels_missing`, `baseline_missing`, `input_age_s`, `inputs` |
 | `data_latency_s` | integer | s | processing time − slot time |
 | `latency_ms` | integer | ms | inference time |
-| `model`, `model_version`, `weights_sha256` | string | | `"flare-nrt"`, `"0.9.0"`, the weights' hash. The portal's provenance producer is `flare-nrt@<model_version>` |
+| `model`, `model_version`, `weights_sha256` | string | | `"flare-nrt"`, `"1.0.0"`, the weights' hash. The portal's provenance producer is `flare-nrt@<model_version>` |
 | `frame_count`, `loop_errors`, `loop_last_error`, `loop_last_error_ts` | | | loop health since start |
 | `server_time` | ISO `Z` | | |
 

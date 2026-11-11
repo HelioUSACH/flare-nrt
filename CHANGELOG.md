@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0
+
+First deployment on the portal's server. No code change from 0.9.0: only
+the version moves (`pyproject.toml`, `flare_nrt.__version__`, so
+`model_version` and the portal's provenance read `1.0.0`; `INTEGRATION.md`;
+`deploy/README.md` clones `v1.0.0`; `fetch_weights` reads the `v1.0.0`
+release). The release carries the same two files as 0.9.0, with the same
+SHA-256, so the pins in `flare_nrt/fetch_weights.py` do not change. This
+tag is the version frozen for the paper.
+
 ## 0.9.0 — 2026-11-10
 
 First published release, after the review of the portal maintainers

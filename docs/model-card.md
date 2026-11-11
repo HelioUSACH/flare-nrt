@@ -92,13 +92,13 @@ synoptic stream from the dated archive: 28.2 days, 95 % of slots usable,
 54 M/X and 161 C flares. The threshold was chosen on this month, so these
 numbers are optimistic.
 
-Replayed with internal version 2.3, the same model as 0.9.0 (2026-11-03, `python -m flare_nrt.validate`;
+Replayed with internal version 2.3, the same model as 0.9.0 and 1.0.0 (2026-11-03, `python -m flare_nrt.validate`;
 GOES list and positions from HEK):
 
 | rule | M/X detected | ≥ M2 | M1–M2 | false alarms | time alerting | first alert vs GOES start / peak (median) |
 |---|---|---|---|---|---|---|
 | **GOES XRS event rule** (SWPC event start: the flux rise that defines the labels) | 100 % by construction | 100 % | 100 % | 0 by construction | — | 0 min (reference) |
-| **flare-nrt** (internal 2.x = 0.9.0), L = 8, threshold 0.80 (2 of 3 or 3 of 3 baselines: identical) | **72 % (39/54)** | **100 % (22/22)** | **53 %** | **3** (≈ 1 per 9 days) | 1.4 % of slots | **+9 min / −1 min** |
+| **flare-nrt** (internal 2.x = 0.9.0 = 1.0.0), L = 8, threshold 0.80 (2 of 3 or 3 of 3 baselines: identical) | **72 % (39/54)** | **100 % (22/22)** | **53 %** | **3** (≈ 1 per 9 days) | 1.4 % of slots | **+9 min / −1 min** |
 | **`aia131_rise`**: no network, same frames; alert when the disk-integrated 131 Å count rate is ≥ k above the same baseline frames (k = 4.9 %, set for flare-nrt's 3 false alarms) | **98 % (53/54)** | | | 3 | 2.0 % of slots | +8 min / −2 min |
 | `aia131_rise`, **out of sample**: k chosen on one half of the month (3.5 % / 4.9 %), scored on the other | **98 % (53/54)** | | | 5 | | |
 | flare-nrt on the same halves (its threshold is fixed) | 72 % (39/54) | | | 3 | | |
