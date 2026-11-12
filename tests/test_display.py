@@ -335,8 +335,20 @@ def _event(cfg, t_start, t_end, eid=1, p=0.9):
     return read_events(cfg.events_path)[-1]
 
 
-def _synthetic_frames(cfg, start, end, skip=()):
-    """Rows and render files for every slot in [start, end], except ``skip``."""
+def _peak_inputs(cfg, slot):
+    """What the loop leaves for an alerting slot: its 4 FITS, its Grad-CAM
+    overlay (``_alert.png``) and map (``_alert.cam.npz``)."""
+    from flare_nrt.artifacts import _write, cam_npz, gradcam_png
+
+    for w in CHANNELS:
+        write_fits(cfg.staging_dir / f"{slot:%Y%m%d}" / file_name(slot, w), w, slot, size=64)
+    _write(gradcam_path(cfg.gradcam_dir, slot, True), gradcam_png(_blob(), np.full((512, 512), 0.3), 1.0))
+    _write(cam_path(cfg.gradcam_dir, slot, True), cam_npz(_blob(), 0.9, LIMB))
+
+
+def _synthetic_frames(cfg, start, end, skip=(), peak=None):
+    """Rows and render files for every slot in [start, end], and a small
+    131 Å FITS (1.2.0), except ``skip``; the peak set's inputs at ``peak``."""
     store = ResultStore(cfg.results_dir)
     s = start
     while s <= end:
@@ -345,7 +357,10 @@ def _synthetic_frames(cfg, start, end, skip=()):
         if s not in skip:
             for ch in ("171", "gradcam-heat"):
                 _touch(render_path(cfg.render_dir, s, ch), f"{ch}{iso(s)}".encode())
+            write_fits(cfg.staging_dir / f"{s:%Y%m%d}" / file_name(s, 131), 131, s, size=64)
         s += CADENCE
+    if peak is not None:
+        _peak_inputs(cfg, peak)
 
 
 def test_replay_waits_until_closed_for_60_min(cfg):
@@ -364,7 +379,7 @@ def test_replay_build_complete(cfg):
     t_start, t_end = T0, T0 + 10 * CADENCE
     ev = _event(cfg, t_start, t_end, eid=7)
     start, end = replays.window(cfg, ev)
-    _synthetic_frames(cfg, start, end)
+    _synthetic_frames(cfg, start, end, peak=t_start + CADENCE)
     now = end + dt.timedelta(hours=1)
     builder = replays.ReplayBuilder(cfg)
     assert builder.maybe_run(now, now) == [7]
@@ -380,7 +395,8 @@ def test_replay_build_complete(cfg):
     assert doc["n_slots"] == len(doc["frames"]) == n == 56
     assert [f["slot"] for f in doc["frames"]] == [iso(start + i * CADENCE) for i in range(n)]
     f = doc["frames"][0]
-    assert {"slot", "t_obs", "probability", "state"} <= set(f) and f["images"] == ["171", "gradcam-heat"]
+    assert {"slot", "t_obs", "probability", "state"} <= set(f) and f["images"] == ["171", "gradcam-heat", "131"]
+    assert doc["peak"]["images"] == list(replays.PEAK_FILES) and doc["missing"]["peak"] == []
     assert (cfg.replays_dir / "7" / "frames" / f"{start:%Y%m%dT%H%M}" / "171.webp").read_bytes() == \
         render_path(cfg.render_dir, start, "171").read_bytes()
     assert not [p for p in cfg.replays_dir.iterdir() if p.name.startswith(".")]   # no temp left
@@ -434,8 +450,8 @@ def test_replay_from_fits_and_stored_maps(cfg):
     now = slots[-1] + dt.timedelta(hours=2)
     doc = replays.build(cfg, ev, now)
     by = {f["slot"]: f for f in doc["frames"]}
-    assert all(by[iso(s)]["images"] == ["171", "gradcam-heat"] for s in ok)
-    assert all(by[iso(s)]["images"] == ["171"] for s in slots if s not in ok)   # no result: no Grad-CAM
+    assert all(by[iso(s)]["images"] == ["171", "gradcam-heat", "131"] for s in ok)
+    assert all(by[iso(s)]["images"] == ["171", "131"] for s in slots if s not in ok)   # no result: no Grad-CAM
     assert doc["missing"]["gradcam-heat"] == []
     # Grad-CAM maps gone: --no-gradcam leaves them missing …
     peaks = {s: find_cam(cfg.gradcam_dir, s)["peak"] for s in ok}
@@ -473,7 +489,7 @@ def test_replays_command_rebuilds_incomplete(cfg, monkeypatch):
     t_start, t_end = T0, T0 + 4 * CADENCE
     ev = _event(cfg, t_start, t_end, eid=5)
     start, end = replays.window(cfg, ev)
-    _synthetic_frames(cfg, start, end, skip={start})
+    _synthetic_frames(cfg, start, end, skip={start}, peak=t_start + CADENCE)
     now = dt.datetime.now(dt.timezone.utc)
     monkeypatch.setenv("FLARE_NRT_DATA_DIR", str(cfg.data_dir))
     for k in ("WEIGHTS", "WEIGHTS_SHA256", "NORM_STATS"):
@@ -485,6 +501,7 @@ def test_replays_command_rebuilds_incomplete(cfg, monkeypatch):
     assert replays.pending(cfg, now, rebuild_incomplete=True)                 # the one-off doesn't
     _touch(render_path(cfg.render_dir, start, "171"))                         # e.g. recomputed
     _touch(render_path(cfg.render_dir, start, "gradcam-heat"))
+    write_fits(cfg.staging_dir / f"{start:%Y%m%d}" / file_name(start, 131), 131, start, size=64)
     assert replays.main([]) == 0
     assert replays.read_replay(cfg, 5)["complete"]
     assert replays.main(["--no-gradcam"]) == 0                                # nothing left to do

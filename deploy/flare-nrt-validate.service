@@ -16,4 +16,5 @@ CPUQuota=100%
 MemoryMax=1G
 NoNewPrivileges=true
 ProtectSystem=strict
+PrivateTmp=true
 ReadWritePaths=/srv/flare-nrt

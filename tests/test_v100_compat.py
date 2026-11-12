@@ -10,7 +10,8 @@ The only differences, all asked for in 1.1.0:
   for AIA images, 86400 for Grad-CAM); a difference whose result row does
   not exist yet keeps max-age 3600;
 - ``/api/events`` rows gain ``replay``;
-- ``model_version`` says 1.1.0."""
+- ``model_version`` says the current version (1.2.0 adds nothing to
+  these endpoints)."""
 
 import datetime as dt
 import io

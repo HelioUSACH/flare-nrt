@@ -64,6 +64,9 @@ the probability and the map's peak come with it as headers, because
 normalised maps look equally strong on quiet and flaring frames); 1600 Å
 images are rescaled so limb darkening and plage are visible; frames are
 pre-rendered as WebP for playback, and each event keeps a one-year replay.
+Version 1.2.0 (display only as well) adds 131 Å to each replay frame and
+keeps each event's peak frame (4 channels, both Grad-CAM styles) for the
+year, so an old event's peak can be shown like a current one.
 
 Code: `HelioUSACH/flare-nrt` (`flare_nrt/`).
 
