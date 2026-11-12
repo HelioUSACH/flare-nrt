@@ -25,11 +25,13 @@ from . import __version__
 from .artifacts import Artifacts
 from .config import Settings
 from .detector import EventTracker, FrameBuffer, baseline_slots, is_alert
+from .display import write_result_renders
 from .grid import CADENCE, CHANNELS, day_key, floor_slot, iso, parse_datetime, parse_iso, utcnow
 from .localize import localize, rate_map
 from .model import Ensemble
 from .preprocess import build_current, build_input, load_norm_stats
 from .qc import QualityControl
+from .replays import ReplayBuilder
 from .retention import Retention
 from .source import LiveSource, ReplaySource
 from .store import ResultStore, append_event, read_json, write_json_atomic
@@ -97,6 +99,8 @@ class Processor:
         self.frame_count = 0
         self.artifacts = Artifacts(cfg, ensemble, enabled=live)
         self.gradcam_wanted = True
+        # 1.1.0: render/<slot>/ WebP after each live result (display only)
+        self.render = live
         self.errors = 0
         self.last_error: tuple[str, str] | None = None
 
@@ -171,7 +175,11 @@ class Processor:
                 if self.live:
                     row["data_latency_s"] = round((now - slot).total_seconds())
                 self.frame_count += 1
-                self.artifacts.save(slot, x, cur, alert, gradcam=alert or self.gradcam_wanted, probability=prob)
+                cam = self.artifacts.save(slot, x, cur, alert, gradcam=alert or self.gradcam_wanted,
+                                          probability=prob, header=self.headers.get(slot))
+                if self.render:
+                    p171 = (self.src.paths(slot) or {}).get(171)
+                    write_result_renders(cfg, slot, p171, [(self.src.paths(s) or {}).get(171) for s in used], cam)
         ev_id, opened, closed = self.tracker.update(slot, alert, prob or 0.0, row.get("location"))
         if closed:
             append_event(cfg.events_path, closed)
@@ -289,6 +297,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
         return proc
 
     retention = Retention(cfg, every_sec=600 if cfg.staging_hours > 0 else 3600)
+    replays = ReplayBuilder(cfg)
     st = read_json(cfg.loop_state_path, {}) or {}
     now = started = utcnow()
     nxt = floor_slot(now - dt.timedelta(minutes=20))
@@ -326,6 +335,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
         write_json_atomic(cfg.state_dir / "heartbeat.json",
                           {"heartbeat": iso(utcnow()), "next_slot": iso(nxt),
                            "last_download": iso(src.last_download)})
+        replays.maybe_run(utcnow(), nxt - CADENCE)
         retention.maybe_run()
         if max_iterations is None or it < max_iterations:
             time.sleep(cfg.poll_sec)

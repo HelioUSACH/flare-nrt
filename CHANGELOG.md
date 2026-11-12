@@ -1,5 +1,72 @@
 # Changelog
 
+## 1.1.0
+
+Display only: how results are rendered and kept for the portal. **The
+model is unchanged**: same weights (same two release files, same SHA-256),
+same normalisation, threshold, baselines, state machine and alert rule, so
+every probability is the one 1.0.0 gives (`tests/test_snapshot.py` passes
+with the same expected value; `flare_nrt/model.py`, `preprocess.py`,
+`detector.py`, `qc.py` and `localize.py` are byte-identical to `v1.0.0`).
+The paper uses `v1.0.0`; that tag does not move. All new endpoints are
+internal (127.0.0.1) and additive; every 1.0.0 endpoint called without the
+new parameters answers as before (`tests/test_v100_compat.py` runs the
+`v1.0.0` tag itself on the same data and compares), except as listed.
+
+1. **Grad-CAM heat style.** `/api/gradcam/{latest|ISO}.png?style=heat`:
+   the map alone, normalised to its own maximum, inferno colours,
+   transparent below 5 % of the maximum, the solar limb as a thin circle,
+   no 131 Å underlay. Headers `X-Gradcam-Peak` (the ensemble-mean map's
+   maximum before normalisation), `X-Gradcam-Prob`, `X-Gradcam-Slot`. The
+   colour bar's stops are in INTEGRATION.md. `style=overlay` (1.0.0's
+   composite) stays the default. To serve it, the loop now keeps the map
+   itself next to each Grad-CAM PNG (`gradcam/…/HHMM.cam.npz`, 36 kB, same
+   retention); slots whose Grad-CAM was made by 1.0.0 have no map and give
+   404 for `style=heat`. Comparison on real frames (2026-07-07, quiet
+   13:50 UT and the M4.0 peak at 14:30): `docs/img/v1.1.0-gradcam-overlay-vs-heat.jpg`.
+2. **1600 Å rendering.** It used the asinh stretch of the EUV channels,
+   which put the whole UV disk at 0.66–0.98 of the colour range (a pale,
+   uniform disk). Each channel now has its own limits and stretch
+   (`render.SCALING`); 1600 Å is linear from 0 to the 99.9th percentile,
+   so limb darkening and plage show. 131/171/304 Å are unchanged
+   (byte-identical). The API's cache name for 1600 Å images changes, so a
+   1.0.0 file is never served. Before/after: `docs/img/v1.1.0-1600-before-after.jpg`.
+3. **Formats and sizes.** `format=png|webp` on `/api/image/…` and
+   `/api/gradcam/…` (default png; WebP at quality 90: 171 Å 56 kB vs
+   244 kB). `size=512|1024` on `/api/image/{wave}` for `kind=img` (default
+   512; 1024 from the 1024² FITS); `diff` and Grad-CAM stay 512.
+   `Content-Type` follows the format. **Changed default:** an image
+   addressed by its slot is now `Cache-Control: public, max-age=31536000,
+   immutable` (was max-age 3600, Grad-CAM 86400), except a difference whose
+   slot has no result yet (max-age 3600); `latest` stays max-age 60.
+4. **Pre-rendered loop.** For each live result the loop writes
+   `render/YYYYMMDD/HHMM/171.webp`, `171-diff.webp` and `gradcam-heat.webp`
+   (0.21 s CPU per result), kept and pruned with the FITS (4 days).
+   `GET /api/loop?channel=171|171-diff|gradcam-heat&hours=1..24` lists them
+   in time order; `GET /api/render/{ISO}/{channel}.webp` serves them.
+5. **Event replays kept a year.** 60 min after an event closes, the loop
+   builds `events/<event_id>/` (`replay.json` + 171 Å and heat frames from
+   t_start − 30 min to t_end + 60 min, ≈ 4 MB), kept 365 days
+   (`FLARE_NRT_REPLAY_DAYS`) by the existing retention. An event whose
+   frames are gone gets a replay that says so (`complete`, `missing`,
+   `note`). `GET /api/events/{id}/replay`, `GET
+   /api/events/{id}/frames/{ISO}/{171|gradcam-heat}.webp`; `/api/events`
+   rows gain `replay: true|false`. One-off for events already in the
+   archive: `python -m flare_nrt.replays` (recomputes the Grad-CAM maps
+   1.0.0 did not keep; rebuilds incomplete replays, reusing their frames).
+6. **Limits and docs.** CPU and disk measured on real frames (INTEGRATION.md
+   "Resources"); unit limits unchanged. New settings
+   `FLARE_NRT_REPLAY_DAYS`, `_REPLAY_PRE_MIN`, `_REPLAY_POST_MIN`,
+   `_WEBP_QUALITY` (`.env.example`, deploy/README.md, which also has the
+   upgrade steps from 1.0.0). `FLARE_NRT_IMAGE_CACHE_DAYS`, which existed,
+   is now listed in `.env.example`.
+
+Also: version 1.1.0 (`pyproject.toml`, `flare_nrt.__version__`,
+`model_version`, INTEGRATION.md, deploy/README.md); `fetch_weights` reads
+the `v1.1.0` release, which carries the same two files as `v1.0.0`. CI
+checks out the full history so the compatibility test can run the
+`v1.0.0` tag.
+
 ## 1.0.0
 
 First deployment on the portal's server. No code change from 0.9.0: only

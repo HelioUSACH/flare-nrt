@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-RELEASE = os.environ.get("FLARE_NRT_RELEASE_URL", "https://github.com/HelioUSACH/flare-nrt/releases/download/v1.0.0")
+RELEASE = os.environ.get("FLARE_NRT_RELEASE_URL", "https://github.com/HelioUSACH/flare-nrt/releases/download/v1.1.0")
 
 FILES = {
     # name: (subdirectory, SHA-256, size in bytes)

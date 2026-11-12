@@ -32,14 +32,17 @@ from importlib import resources
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import __version__
-from .artifacts import gradcam_path
+from .artifacts import find_cam, gradcam_path
 from .config import Settings
 from .detector import baseline_slots
+from .display import RENDER_CHANNELS, FitsLocator, render_path
 from .goes import class_flux, fetch_swpc, read_csv
-from .grid import CADENCE, CHANNELS, day_key, file_name, iso, parse_datetime, parse_file_name, parse_iso, utcnow
+from .grid import CADENCE, CHANNELS, day_key, iso, parse_datetime, parse_file_name, parse_iso, utcnow
+from .render import FORMATS
+from .replays import REPLAY_CHANNELS, frame_path, read_replay, replay_dir
 from .store import ResultStore, read_events, read_json
 
 
@@ -70,9 +73,17 @@ def live_status(status: dict | None, heartbeat: dict | None, now: dt.datetime, s
     return "live", None, since
 
 
-def _png(data: bytes, slot: dt.datetime, max_age: int = 60) -> Response:
-    return Response(data, media_type="image/png",
-                    headers={"Cache-Control": f"max-age={max_age}", "X-Observation-Time": iso(slot)})
+IMMUTABLE = "public, max-age=31536000, immutable"
+
+
+def _img(data: bytes, slot: dt.datetime, cache: int | str = 60, fmt: str = "png",
+         extra: dict | None = None) -> Response:
+    """An image response. ``cache``: seconds, or ``IMMUTABLE`` for a file
+    addressed by its slot that can no longer change."""
+    cc = cache if isinstance(cache, str) else f"max-age={cache}"
+    return Response(data, media_type=FORMATS[fmt],
+                    headers={"Cache-Control": cc, "X-Observation-Time": iso(slot), **(extra or {})})
+
 
 
 def create_app(cfg: Settings | None = None) -> FastAPI:
@@ -142,6 +153,9 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             peak = parse_iso(e["t_pmax"])
             has = gradcam_path(cfg.gradcam_dir, peak, True).exists()
             e["gradcam"] = f"/api/gradcam/{iso(peak)}.png" if has else None
+            # a replay to show: built, with at least one frame (one whose frames were all gone says so in its JSON)
+            rp = read_replay(cfg, e["event_id"]) if (replay_dir(cfg, e["event_id"]) / "replay.json").exists() else None
+            e["replay"] = bool(rp and rp.get("event", {}).get("t_start") == e["t_start"] and rp.get("frames"))
         return {"events": evs}
 
     @app.get("/api/series")
@@ -164,28 +178,25 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
                            for r in _rows(now - dt.timedelta(hours=hours), now)]}
 
     # -- images ------------------------------------------------------------
-    fits_index: dict = {"built": 0.0, "paths": {}}
-
-    def _indexed(name: str) -> Path | None:
-        """FITS in ``FLARE_NRT_FITS_DIRS`` (e.g. the month a replay ran on),
-        by file name; the index is rebuilt at most every 10 min."""
-        if not cfg.fits_dirs:
-            return None
-        if time.time() - fits_index["built"] > 600:
-            paths = {}
-            for root in cfg.fits_dirs:
-                for p in Path(root).rglob("AIA*.fits"):
-                    paths.setdefault(p.name, p)
-            fits_index.update(built=time.time(), paths=paths)
-        return fits_index["paths"].get(name)
+    # FITS in staging/, then in FLARE_NRT_FITS_DIRS (e.g. the month a replay ran on)
+    locator = FitsLocator(cfg)
 
     def _slot_files(slot: dt.datetime) -> dict:
-        d = cfg.staging_dir / day_key(slot)
-        out = {}
-        for w in CHANNELS:
-            p = d / file_name(slot, w)
-            out[w] = p if p.exists() else (_indexed(p.name) or p)
-        return out
+        return {w: locator.path(slot, w) for w in CHANNELS}
+
+    def _cached(name: str, make) -> bytes:
+        """Rendered once into cache/ (the API's only writable directory)."""
+        cached = cfg.cache_dir / name
+        if not cached.exists():
+            data = make()
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cached.with_suffix(".tmp")
+            tmp.write_bytes(data)
+            tmp.replace(cached)
+            for old in [*cfg.cache_dir.glob("*.png"), *cfg.cache_dir.glob("*.webp")]:
+                if time.time() - old.stat().st_mtime > cfg.image_cache_days * 86400:
+                    old.unlink(missing_ok=True)
+        return cached.read_bytes()
 
     def _latest_slot(wave: int):
         best = None
@@ -249,37 +260,50 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         return {"slot": st.get("observation_time"), "baseline_slots": st.get("baseline_slots") or [],
                 "channels": out}
 
+    def _row(s: dt.datetime) -> dict | None:
+        return next((r for r in ResultStore(cfg.results_dir).read_day(day_key(s)) if r["slot"] == iso(s)), None)
+
     @app.get("/api/image/{wave}.png")
-    def image(wave: int, kind: str = Query("img", pattern="^(img|diff)$"), slot: str | None = None):
-        """One AIA channel, 512 px PNG, north up: ``kind=img`` (DN/s, asinh,
+    def image(wave: int, kind: str = Query("img", pattern="^(img|diff)$"), slot: str | None = None,
+              format: str = Query("png", pattern="^(png|webp)$"), size: int = Query(512)):
+        """One AIA channel, north up: ``kind=img`` (DN/s, per-channel stretch,
         SDO-style colours) or ``kind=diff`` (current − mean of its baselines,
-        grey ±). Without ``slot``: the latest result's slot."""
+        grey ±). Without ``slot``: the latest result's slot. ``format``
+        png (default) or webp (quality 90); ``size`` 512 (default) or 1024,
+        1024 for ``kind=img`` only (from the 1024² synoptic FITS)."""
         from . import render
 
         if wave not in CHANNELS:
             raise HTTPException(404, "unknown channel")
+        if size not in render.SIZES or (size != 512 and kind != "img"):
+            raise HTTPException(422, "size is 512 or 1024 (1024 only for kind=img)")
         s, path, bls = _pick(wave, _slot_param(slot))
         if s is None or not path.exists():
             raise HTTPException(404, "image not available")
         bls = [b for b in bls if b.exists()]
         if kind == "diff" and len(bls) < cfg.min_baseline:
             raise HTTPException(404, "difference not available")
-        cached = cfg.cache_dir / f"{s:%Y%m%dT%H%M}_{wave}_{kind}.png"
-        if not cached.exists():
-            png = render.image_png(path, wave) if kind == "img" else render.diff_png(path, bls)
-            cached.parent.mkdir(parents=True, exist_ok=True)
-            tmp = cached.with_suffix(".tmp")
-            tmp.write_bytes(png)
-            tmp.replace(cached)
-            for old in cfg.cache_dir.glob("*.png"):
-                if time.time() - old.stat().st_mtime > cfg.image_cache_days * 86400:
-                    old.unlink(missing_ok=True)
-        return _png(cached.read_bytes(), s, 60 if slot is None else 3600)
+        q = cfg.webp_quality
+        # 1600 Å is scaled differently since 1.1.0: its cache name changes so a 1.0.0 file is never served
+        tag = "-lin" if kind == "img" and render.SCALING.get(wave, ("",))[0] == "linear" else ""
+        name = f"{s:%Y%m%dT%H%M}_{wave}_{kind}{tag}{'' if size == 512 else f'_{size}'}.{format}"
+        data = _cached(name, lambda: render.image(path, wave, size, format, q) if kind == "img"
+                       else render.diff(path, bls, format, q))
+        # a slot's image never changes; its difference only once the result fixed the baselines
+        cache = 60 if slot is None else (IMMUTABLE if kind == "img" or _row(s) else 3600)
+        return _img(data, s, cache, format)
 
     @app.get("/api/gradcam/{which}.png")
-    def gradcam(which: str):
-        """Grad-CAM of the ensemble over the 131 Å input, 512 px, north up:
-        ``latest`` (the latest result) or a slot (ISO 8601)."""
+    def gradcam(which: str, style: str = Query("overlay", pattern="^(overlay|heat)$"),
+                format: str = Query("png", pattern="^(png|webp)$")):
+        """Grad-CAM of the ensemble, 512 px, north up: ``latest`` (the latest
+        result) or a slot (ISO 8601). ``style=overlay`` (default): over the
+        131 Å input, colour scaled with probability / threshold.
+        ``style=heat``: the map alone, normalised to its own maximum, inferno,
+        transparent below 5 % of it, the limb as a thin circle; headers
+        ``X-Gradcam-Peak``, ``X-Gradcam-Prob``, ``X-Gradcam-Slot``."""
+        from . import render
+
         if which == "latest":
             st = read_json(cfg.status_path) or {}
             if not st.get("observation_time"):
@@ -287,11 +311,83 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             s = parse_iso(st["observation_time"])
         else:
             s = _slot_param(which)
+        cache = 60 if which == "latest" else IMMUTABLE
+        if style == "heat":
+            rec = find_cam(cfg.gradcam_dir, s)
+            if rec is None:
+                raise HTTPException(404, "Grad-CAM heat map not available for this slot")
+            data = _cached(f"{s:%Y%m%dT%H%M}_gradcam_heat.{format}",
+                           lambda: render.gradcam_heat(rec["cam"], rec["limb"], format, cfg.webp_quality))
+            return _img(data, s, cache, format, {"X-Gradcam-Peak": f"{rec['peak']:.6f}",
+                                                 "X-Gradcam-Prob": f"{rec['probability']:.6f}",
+                                                 "X-Gradcam-Slot": iso(s)})
         for alert in (False, True):
             p = gradcam_path(cfg.gradcam_dir, s, alert)
             if p.exists():
-                return _png(p.read_bytes(), s, 60 if which == "latest" else 86400)
+                if format == "png":
+                    return _img(p.read_bytes(), s, cache)
+                data = _cached(f"{s:%Y%m%dT%H%M}_gradcam_overlay.webp",
+                               lambda p=p: render.reencode(p.read_bytes(), "webp", cfg.webp_quality))
+                return _img(data, s, cache, "webp")
         raise HTTPException(404, "Grad-CAM not available for this slot")
+
+    # -- pre-rendered loop and event replays (1.1.0) ------------------------
+    @app.get("/api/loop")
+    def loop(channel: str = Query("171", pattern="^(171|171-diff|gradcam-heat)$"),
+             hours: int = Query(6, ge=1, le=24)):
+        """The last ``hours`` of pre-rendered frames of one channel, oldest
+        first: [{slot, t_obs (171 Å T_OBS), url, probability, state}]."""
+        now = utcnow()
+        since = now - dt.timedelta(hours=hours)
+        rows = {r["slot"]: r for r in _rows(since, now)}
+        frames = []
+        for d in sorted({day_key(since + dt.timedelta(days=i)) for i in range(3)}):
+            ddir = cfg.render_dir / d
+            if not ddir.is_dir():
+                continue
+            for sd in sorted(ddir.iterdir()):
+                try:
+                    t = dt.datetime.strptime(d + sd.name, "%Y%m%d%H%M").replace(tzinfo=dt.timezone.utc)
+                except ValueError:
+                    continue
+                if not (since <= t <= now) or not (sd / f"{channel}.webp").exists():
+                    continue
+                r = rows.get(iso(t)) or {}
+                frames.append({"slot": iso(t), "t_obs": (r.get("inputs") or {}).get("171"),
+                               "url": f"/api/render/{iso(t)}/{channel}.webp",
+                               "probability": r.get("probability"), "state": r.get("state")})
+        return JSONResponse({"channel": channel, "hours": hours, "frames": frames},
+                            headers={"Cache-Control": "max-age=60"})
+
+    @app.get("/api/render/{slot}/{channel}.webp")
+    def rendered(slot: str, channel: str):
+        """One pre-rendered frame (``/api/loop`` gives the URLs)."""
+        if channel not in RENDER_CHANNELS:
+            raise HTTPException(404, "unknown channel")
+        s = _slot_param(slot)
+        p = render_path(cfg.render_dir, s, channel)
+        if not p.exists():
+            raise HTTPException(404, "frame not available")
+        return _img(p.read_bytes(), s, IMMUTABLE, "webp")
+
+    @app.get("/api/events/{event_id}/replay")
+    def event_replay(event_id: int):
+        """The event's replay.json (flare_nrt/replays.py; INTEGRATION.md)."""
+        doc = read_replay(cfg, event_id)
+        if doc is None:
+            raise HTTPException(404, "no replay for this event")
+        return JSONResponse(doc, headers={"Cache-Control": "max-age=3600"})
+
+    @app.get("/api/events/{event_id}/frames/{slot}/{channel}.webp")
+    def event_frame(event_id: int, slot: str, channel: str):
+        """One frame of an event's replay: ``171`` or ``gradcam-heat``."""
+        if channel not in REPLAY_CHANNELS:
+            raise HTTPException(404, "unknown channel")
+        s = _slot_param(slot)
+        p = frame_path(cfg, event_id, s, channel)
+        if not p.exists():
+            raise HTTPException(404, "frame not in this replay")
+        return _img(p.read_bytes(), s, IMMUTABLE, "webp")
 
     # -- retrospective viewer ----------------------------------------------
     @app.get("/api/range")

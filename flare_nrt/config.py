@@ -65,6 +65,13 @@ class Settings:
     results_days: float = field(default_factory=lambda: float(_env("RESULTS_DAYS", "400")))
     min_free_gb: float = field(default_factory=lambda: float(_env("MIN_FREE_GB", "10")))
 
+    # display (1.1.0): pre-rendered WebP per result in render/ (kept like the FITS,
+    # staging_days) and event replays in events/<id>/, kept replay_days by event end
+    replay_days: float = field(default_factory=lambda: float(_env("REPLAY_DAYS", "365")))
+    replay_pre_min: int = field(default_factory=lambda: int(_env("REPLAY_PRE_MIN", "30")))
+    replay_post_min: int = field(default_factory=lambda: int(_env("REPLAY_POST_MIN", "60")))
+    webp_quality: int = field(default_factory=lambda: int(_env("WEBP_QUALITY", "90")))
+
     # curation
     goes_url: str = field(default_factory=lambda: _env(
         "GOES_URL", "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json"))
@@ -105,8 +112,18 @@ class Settings:
         return self.data_dir / "gradcam"
 
     @property
+    def render_dir(self) -> Path:
+        """Pre-rendered WebP of each result: render/YYYYMMDD/HHMM/{171,171-diff,gradcam-heat}.webp."""
+        return self.data_dir / "render"
+
+    @property
+    def replays_dir(self) -> Path:
+        """Event replays: events/<event_id>/replay.json + frames/."""
+        return self.data_dir / "events"
+
+    @property
     def cache_dir(self) -> Path:
-        """The only directory the API writes (rendered PNG previews)."""
+        """The only directory the API writes (rendered previews)."""
         return self.data_dir / "cache"
 
     @property
@@ -127,5 +144,5 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         for d in (self.staging_dir, self.results_dir, self.archive_dir, self.state_dir,
-                  self.tensors_dir, self.gradcam_dir, self.cache_dir):
+                  self.tensors_dir, self.gradcam_dir, self.cache_dir, self.render_dir, self.replays_dir):
             d.mkdir(parents=True, exist_ok=True)
