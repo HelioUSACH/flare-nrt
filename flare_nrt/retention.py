@@ -10,13 +10,19 @@ Rules:
 3. ``tensors/YYYYMMDD`` (model inputs) older than ``tensors_days`` (2).
 4. ``gradcam/YYYYMMDD/HHMM.png`` older than ``gradcam_days`` (2);
    ``HHMM_alert.png`` older than ``gradcam_alert_days`` (400).
-5. ``cache/*.png`` (API previews) older than ``image_cache_days`` (1); the
-   API prunes these itself too.
+   ``HHMM[_alert].cam.npz`` (the Grad-CAM map, 1.1.0) follow their PNG.
+5. ``cache/*.png``, ``cache/*.webp`` (API previews) older than
+   ``image_cache_days`` (1); the API prunes these itself too.
 6. ``archive/YYYY/MM/DD`` older than ``archive_local_days`` (7): the
    long-term archive is the off-server copy (docs/archive-format.md).
 7. ``results/YYYYMMDD.jsonl`` older than ``results_days`` (400, ~1 MB/day),
    and ``reports/*.json`` (weekly validation) older than that too.
-8. If free space is below ``min_free_gb``: tensors, archive days, then
+8. ``render/YYYYMMDD/HHMM/`` (pre-rendered WebP, 1.1.0) with the raw FITS:
+   older than ``staging_days`` (or ``staging_hours``), by slot time.
+9. ``events/<event_id>/`` (event replays, 1.1.0) whose event ended more
+   than ``replay_days`` (365) ago; leftovers of an interrupted build
+   (``events/.<id>.tmp-*``) after a day.
+10. If free space is below ``min_free_gb``: tensors, archive days, then
    staging days, oldest first, until it isn't — never the last 2 days of
    staging, which the baselines and the day's curation need.
 
@@ -90,6 +96,26 @@ class Retention:
     def _dated_dirs(self, root: Path):
         return [(d, p) for p in sorted(root.glob("*")) if p.is_dir() and (d := _day(p.name))]
 
+    def _prune_replays(self, now: dt.datetime, rm) -> None:
+        from .grid import parse_iso
+        from .store import read_json
+
+        cut = now - dt.timedelta(days=self.cfg.replay_days)
+        for p in self.cfg.replays_dir.glob("*"):
+            if not p.is_dir():
+                continue
+            if p.name.startswith("."):
+                if time.time() - p.stat().st_mtime > 86400:
+                    rm(p)
+                continue
+            doc = read_json(p / "replay.json") or {}
+            try:
+                t_end = parse_iso(doc["event"]["t_end"])
+            except (KeyError, TypeError, ValueError):
+                t_end = dt.datetime.fromtimestamp(p.stat().st_mtime, dt.timezone.utc)
+            if t_end < cut:
+                rm(p)
+
     def run(self, now: dt.datetime | None = None) -> list[str]:
         cfg, now = self.cfg, now or utcnow()
         removed: list[str] = []
@@ -133,11 +159,13 @@ class Retention:
                             rm(f)
 
         prune_by_slot(cfg.tensors_dir, cfg.tensors_days)
-        prune_by_slot(cfg.gradcam_dir, cfg.gradcam_days, keep=lambda f: f.name.endswith("_alert.png"))
+        prune_by_slot(cfg.gradcam_dir, cfg.gradcam_days, keep=lambda f: "_alert." in f.name)
         prune_by_slot(cfg.gradcam_dir, cfg.gradcam_alert_days)
-        for f in cfg.cache_dir.glob("*.png"):
+        prune_by_slot(cfg.render_dir, hours / 24)
+        for f in [*cfg.cache_dir.glob("*.png"), *cfg.cache_dir.glob("*.webp")]:
             if time.time() - f.stat().st_mtime > cfg.image_cache_days * 86400:
                 rm(f)
+        self._prune_replays(now, rm)
         for d, p in self._archive_days():
             if age_days(d) > cfg.archive_local_days:
                 rm(p)

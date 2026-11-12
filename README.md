@@ -58,6 +58,7 @@ python -m flare_nrt.curate                                  # daily: archive + l
 python -m flare_nrt.validate --start 2026-10-21 --end 2026-10-27   # vs GOES and vs the baseline rule
 python -m flare_nrt.loop --replay /path/to/fits             # replay stored FITS through the same code
 python -m flare_nrt.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv   # GOES list of a past period
+python -m flare_nrt.replays                                 # event replays not built yet (the loop builds new ones)
 ```
 
 `http://127.0.0.1:5050/viewer` is a retrospective viewer. It lets you
@@ -92,9 +93,10 @@ the thesis pipeline on AIA level-1 images: solar cycle 24 for training,
 ```
 flare_nrt/  config, grid (2-min slots), source (JSOC), qc, preprocess,
            model (ensemble, SHA-256, Grad-CAM), detector (baseline, alert,
-           events), loop, artifacts (tensors, Grad-CAM), localize, render,
-           server (HTTP), store, retention, curate, goes, validate,
-           fetch_weights
+           events), loop, artifacts (tensors, Grad-CAM), localize, render
+           (images, Grad-CAM heat style), display (render/ per result),
+           replays (event replays), server (HTTP), store, retention,
+           curate, goes, validate, fetch_weights
 deploy/    systemd units and the deployment note
 docs/      model card, archive format
 tests/     offline tests; fixtures/ holds one real model input

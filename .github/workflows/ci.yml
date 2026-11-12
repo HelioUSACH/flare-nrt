@@ -9,7 +9,10 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
+      # all history and tags: tests/test_v100_compat.py runs the v1.0.0 tag itself
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

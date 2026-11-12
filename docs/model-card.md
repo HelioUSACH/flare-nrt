@@ -55,6 +55,16 @@ or smoothing: `raw_score` is the same number.
 - **Grad-CAM:** on each member's last block (`layer4`), averaged over the
   members.
 
+**Display (1.1.0, rendering only; detection unchanged).** Version 1.1.0
+changes how results are shown, not how they are made: the weights,
+normalisation, threshold, baselines, state machine and every probability
+are those of 1.0.0, the version the paper uses. The Grad-CAM can also be
+shown as a heat map alone (`style=heat`, normalised to its own maximum;
+the probability and the map's peak come with it as headers, because
+normalised maps look equally strong on quiet and flaring frames); 1600 Å
+images are rescaled so limb darkening and plage are visible; frames are
+pre-rendered as WebP for playback, and each event keeps a one-year replay.
+
 Code: `HelioUSACH/flare-nrt` (`flare_nrt/`).
 
 ## Training data
@@ -148,8 +158,12 @@ will be updated from those reports.
   (2026-10-28 15:52 UT, p = 0.047), the ensemble-mean map is strongest in
   the corners outside the solar disk. Each member's map is scaled to its
   own maximum, so a weak map still shows a peak somewhere. That the peak is
-  off-disk is consistent with the shortcut above. The public PNG therefore
-  scales the colour with probability / threshold.
+  off-disk is consistent with the shortcut above. The default overlay
+  therefore scales the colour with probability / threshold. The heat style
+  (1.1.0) normalises each map to its own maximum and is meant to be shown
+  with the frame's probability (`X-Gradcam-Prob`): on the quiet frame of
+  2026-07-07 13:50 UT (p = 0.08) it is as bright as at the M4.0 peak
+  (14:30, p = 0.997), and strongest off the disk.
 - **Domain gap, synoptic vs level-1.** With an identical baseline, the
   output on synoptic data is ~0.05–0.13 in quiet Sun, against ~0.001 on
   level-1.
