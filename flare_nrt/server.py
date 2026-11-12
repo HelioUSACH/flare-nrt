@@ -42,7 +42,7 @@ from .display import RENDER_CHANNELS, FitsLocator, render_path
 from .goes import class_flux, fetch_swpc, read_csv
 from .grid import CADENCE, CHANNELS, day_key, iso, parse_datetime, parse_file_name, parse_iso, utcnow
 from .render import FORMATS
-from .replays import REPLAY_CHANNELS, frame_path, read_replay, replay_dir
+from .replays import PEAK_FILES, REPLAY_CHANNELS, frame_path, peak_path, read_replay, replay_dir
 from .store import ResultStore, read_events, read_json
 
 
@@ -380,7 +380,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
 
     @app.get("/api/events/{event_id}/frames/{slot}/{channel}.webp")
     def event_frame(event_id: int, slot: str, channel: str):
-        """One frame of an event's replay: ``171`` or ``gradcam-heat``."""
+        """One frame of an event's replay: ``131``, ``171`` or ``gradcam-heat``."""
         if channel not in REPLAY_CHANNELS:
             raise HTTPException(404, "unknown channel")
         s = _slot_param(slot)
@@ -388,6 +388,28 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         if not p.exists():
             raise HTTPException(404, "frame not in this replay")
         return _img(p.read_bytes(), s, IMMUTABLE, "webp")
+
+    @app.get("/api/events/{event_id}/peak/{name}.webp")
+    def event_peak(event_id: int, name: str):
+        """The event's peak frame (1.2.0): ``131``, ``171``, ``304``, ``1600``
+        (``kind=img``, 512 px), ``gradcam-heat`` or ``gradcam-overlay``; the
+        Grad-CAM ones with the headers of ``/api/gradcam``."""
+        if name not in PEAK_FILES:
+            raise HTTPException(404, "unknown peak file")
+        doc = read_replay(cfg, event_id)
+        peak = (doc or {}).get("peak") or {}
+        p = peak_path(cfg, event_id, name)
+        if not peak.get("slot") or not p.exists():
+            raise HTTPException(404, "file not in this event's peak set")
+        s = parse_iso(peak["slot"])
+        extra = {}
+        if name.startswith("gradcam-"):
+            extra["X-Gradcam-Slot"] = iso(s)
+            if peak.get("gradcam_peak") is not None:
+                extra["X-Gradcam-Peak"] = f"{peak['gradcam_peak']:.6f}"
+            if peak.get("probability") is not None:
+                extra["X-Gradcam-Prob"] = f"{peak['probability']:.6f}"
+        return _img(p.read_bytes(), s, IMMUTABLE, "webp", extra)
 
     # -- retrospective viewer ----------------------------------------------
     @app.get("/api/range")

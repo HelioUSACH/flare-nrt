@@ -1,5 +1,60 @@
 # Changelog
 
+## 1.2.0
+
+Display only, like 1.1.0: what an event replay keeps. **The model is
+unchanged**: same weights (same two release files, same SHA-256), same
+normalisation, threshold, baselines, state machine and alert rule
+(`tests/test_snapshot.py` passes unchanged; `flare_nrt/model.py`,
+`preprocess.py`, `detector.py`, `qc.py`, `localize.py`, `render.py`,
+`loop.py` and `tests/fixtures/` are byte-identical to `v1.1.0`). Every
+1.1.0 endpoint answers as before; the additions are internal (127.0.0.1).
+
+1. **131 Å in every replay frame.** `events/<id>/frames/<slot>/131.webp`,
+   512 px, the same bytes as `/api/image/131.png?kind=img&format=webp`,
+   rendered from the FITS when the replay is built (they are still on
+   disk then) and kept with the replay (365 days). `REPLAY_CHANNELS` gains
+   `131`; `GET /api/events/{id}/frames/{ISO}/131.webp` serves it;
+   `replay.json` lists it in each frame's `images` and slots without it in
+   `missing["131"]`.
+2. **The peak frame, once per event.** `events/<id>/peak/`: the four
+   channels at the peak slot (`131`, `171`, `304`, `1600`.webp; `kind=img`,
+   512 px) and its Grad-CAM in both styles (`gradcam-heat.webp`,
+   `gradcam-overlay.webp`), each byte-identical to what `/api/image` and
+   `/api/gradcam` give for that slot with `format=webp`. `GET
+   /api/events/{id}/peak/{name}.webp` serves them; the Grad-CAM ones carry
+   `X-Gradcam-Slot`, `X-Gradcam-Prob` and `X-Gradcam-Peak`. `replay.json`
+   gains `peak` (`slot`, `t_obs`, `probability`, `gradcam_peak`, `images`)
+   and `missing["peak"]`. The schema stays `flare-nrt-replay/1` (additions
+   only).
+3. **The one-off command adds the new files to existing replays.** `python
+   -m flare_nrt.replays` now also rebuilds replays built by 1.1.0 (no
+   `peak` key), reusing the files they have. Where the FITS still exist it
+   renders 131 Å and the peak's channels. Where they are gone, `replay.json`
+   lists the missing files (`missing`, `complete: false`, `note`), as
+   before. The peak's Grad-CAM (kept 400 days for alerting frames) is
+   added either way. When a map has to be recomputed, the overlay is
+   redrawn from it and the stored model input. The live loop builds new
+   replays with the new files and leaves old ones to the command.
+4. **Disk and CPU, measured** on the M4.0 of 2026-07-07 with the real
+   weights (55-slot window): 131 Å frames 86 kB each (4.7 MB per event),
+   peak set 0.30 MB, so **9.3 MB per event** (4.2 MB in 1.1.0) and
+   ≈ 3.5–6 GB per year of replays at the calibration month's activity
+   (1.5–3 GB in 1.1.0). Rendering a 131 Å frame takes 0.08 s (median), so
+   the loop spends ≈ 5 s once per event. INTEGRATION.md "Resources".
+5. **`PrivateTmp` for one-off and validation runs.** The `systemd-run`
+   one-off documented for 1.1.0 lacked `-p PrivateTmp=yes`.
+   `ProtectSystem=strict` makes `/tmp` read-only and torch needs a writable
+   temporary directory, so the command failed. Fixed in README.md and
+   deploy/README.md (upgrade steps from 1.1.0). `flare-nrt-validate.service`
+   had the same problem (it imports torch through `curate`): it gains
+   `PrivateTmp=true` like the other units.
+
+Also: version 1.2.0 (`pyproject.toml`, `flare_nrt.__version__`,
+`model_version`, INTEGRATION.md, deploy/README.md); `fetch_weights` reads
+the `v1.2.0` release, which carries the same two files as `v1.0.0` and
+`v1.1.0`.
+
 ## 1.1.0
 
 Display only: how results are rendered and kept for the portal. **The
