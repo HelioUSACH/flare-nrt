@@ -9,13 +9,29 @@ difference channel: that one is in raw DN, and AIA's exposure control cuts
 where the flare is. Array row 0
 is the first FITS row, i.e. the *south* edge for a north-up image: y grows
 with the row index (the v3 pipeline's localiser appears to have had y flipped;
-this module is written from the FITS convention instead)."""
+this module is written from the FITS convention instead).
+
+The region is the brightest connected part of the smoothed difference above
+half its maximum, and only if that maximum stands out: above mean + 5σ of the
+difference (since 0.9.0). After a flare's 131 Å maximum the baselines
+(t−8…−12 min) hold the flare, so the difference has a deep negative lobe;
+its σ then exceeds every positive value and nothing passed, so alert frames
+there had no location (event 1, 2026-11-11; 9 of 64 frames of the M4.0 of
+2026-07-07, 14:28–14:44). Since 1.3.0, only when that test finds nothing, σ
+is taken from the median absolute deviation instead, which the lobe does not
+inflate (``method`` ``…_robust``). Frames the first test locates get exactly
+the location they got before. What is located is the 131 Å brightening
+relative to 8–12 min earlier: after the flare's 131 Å maximum it can be
+post-flare loops or an eruption next to the kernel, not the kernel."""
 
 from __future__ import annotations
 
 import numpy as np
 import torch
 from scipy import ndimage
+
+METHOD = "diff131_rate_brightest_region"
+METHOD_ROBUST = "diff131_rate_brightest_region_robust"   # 1.3.0, see localize()
 
 
 def rate_map(data: np.ndarray, header: dict) -> np.ndarray:
@@ -27,6 +43,21 @@ def rate_map(data: np.ndarray, header: dict) -> np.ndarray:
     return resize_512(img).numpy()
 
 
+def rate_from_fits(path) -> tuple[np.ndarray, dict]:
+    """(DN/s on the 512 grid, header) of one 131 Å FITS, as the loop computes it."""
+    from .qc import read_frame
+
+    fr = read_frame(path)
+    return rate_map(fr.data, fr.header), fr.header
+
+
+def locate(current: np.ndarray, baselines: list[np.ndarray], header: dict) -> dict | None:
+    """``localize`` of current − mean(baselines) (131 Å DN/s maps)."""
+    if current is None or not baselines or any(b is None for b in baselines):
+        return None
+    return localize(current - sum(baselines) / len(baselines), header)
+
+
 def localize(diff: np.ndarray | torch.Tensor, header: dict, src_size: int | None = None) -> dict | None:
     """``diff``: 2-D difference map on the 512 grid (DN/s)."""
     src_size = int(src_size or header.get("NAXIS1") or 1024)
@@ -35,10 +66,15 @@ def localize(diff: np.ndarray | torch.Tensor, header: dict, src_size: int | None
     peak = float(d.max())
     if peak <= 0:
         return None
-    thr = max(0.5 * peak, float(d.mean() + 5 * d.std()))
-    lab, n = ndimage.label(d >= thr)
+    method = METHOD
+    lab, n = ndimage.label(d >= max(0.5 * peak, float(d.mean() + 5 * d.std())))
     if n == 0:
-        return None
+        med = float(np.median(d))
+        floor = med + 5 * 1.4826 * float(np.median(np.abs(d - med)))
+        if peak <= floor:
+            return None
+        method = METHOD_ROBUST
+        lab, n = ndimage.label(d >= max(0.5 * peak, floor))
     sums = ndimage.sum(np.clip(d, 0, None), lab, index=range(1, n + 1))
     k = int(np.argmax(sums)) + 1
     region = lab == k
@@ -73,6 +109,6 @@ def localize(diff: np.ndarray | torch.Tensor, header: dict, src_size: int | None
         "area_arcsec2": round(area_px * (cdelt1 * scale) * (cdelt2 * scale), 1),
         "bbox_arcsec": [round(min(x0, x1), 1), round(min(y0, y1), 1), round(max(x0, x1), 1), round(max(y0, y1), 1)],
         "on_limb": bool(rad > 0.9 * rsun),
-        "method": "diff131_rate_brightest_region",
+        "method": method,
         "confidence": "experimental",
     }

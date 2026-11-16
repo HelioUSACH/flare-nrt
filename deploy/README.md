@@ -10,7 +10,7 @@ own. The portal maintainers install and run it, from a tagged release.
 | path | what | owner |
 |---|---|---|
 | `/opt/flare-nrt` | a checkout of the tag, with `.venv/` | root (read-only for the service) |
-| `/srv/flare-nrt` | `FLARE_NRT_DATA_DIR`: staging, results, state, tensors, gradcam, archive, cache; since 1.1.0 also `render/` (pre-rendered WebP, 4 days) and `events/` (event replays, 365 days; with 131 Å frames and the peak set since 1.2.0) | `flare-nrt` |
+| `/srv/flare-nrt` | `FLARE_NRT_DATA_DIR`: staging, results, state, tensors, gradcam, archive, cache; since 1.1.0 also `render/` (pre-rendered WebP, 4 days) and `events/` (event replays, 365 days; with 131 Å frames and the peak set since 1.2.0, a Grad-CAM map on every frame with a result and the location since 1.3.0) | `flare-nrt` |
 | `/srv/flare-nrt/models`, `/srv/flare-nrt/metadata` | the release files (`python -m flare_nrt.fetch_weights --dest /srv/flare-nrt`) | `flare-nrt` |
 | `/etc/flare-nrt/flare-nrt.env` | settings (copy of `.env.example`; no secrets) | root |
 
@@ -51,7 +51,7 @@ FLARE_NRT_NORM_STATS=/srv/flare-nrt/metadata/global_norm_stats.json
 As root, in this order:
 
 ```bash
-git clone --branch v1.2.0 https://github.com/HelioUSACH/flare-nrt.git /opt/flare-nrt
+git clone --branch v1.3.0 https://github.com/HelioUSACH/flare-nrt.git /opt/flare-nrt
 cd /opt/flare-nrt && python3 -m venv .venv
 .venv/bin/pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
 .venv/bin/pip install -r requirements.lock.txt && .venv/bin/pip install --no-deps .
@@ -168,6 +168,71 @@ itself, 60 min after the event closes.
 Nothing else is needed: the new files live inside each `events/<id>/`
 and are pruned with it (365 days, unchanged).
 
+## Upgrade from 1.2.0 to 1.3.0
+
+1.3.0 changes what an event replay keeps and how the experimental
+location is found. Detection is unchanged: weights, normalisation,
+threshold, baselines, state machine and every probability are those of
+1.0.0, and the release carries the same two files with the same SHA-256,
+so `fetch_weights` has nothing to do. `requirements.lock.txt` and the
+units are unchanged. As root:
+
+```bash
+cd /opt/flare-nrt
+git fetch --tags && git checkout v1.3.0
+.venv/bin/pip install -r requirements.lock.txt && .venv/bin/pip install --no-deps .
+systemctl restart flare-nrt-loop flare-nrt-api
+curl -s 127.0.0.1:5050/api/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["model_version"])'   # 1.3.0
+# once: Grad-CAM maps on every frame and the location, for the replays already built
+# (event 1's FITS were kept in /srv/flare-nrt/keep/20261111 for this)
+systemd-run --wait --pty --uid=flare-nrt --gid=flare-nrt -p WorkingDirectory=/opt/flare-nrt \
+  -p EnvironmentFile=/etc/flare-nrt/flare-nrt.env -p MemoryMax=2G -p CPUQuota=100% -p Nice=10 \
+  -p ProtectSystem=strict -p PrivateTmp=yes -p ReadWritePaths=/srv/flare-nrt \
+  /opt/flare-nrt/.venv/bin/python -m flare_nrt.replays --fits-root /srv/flare-nrt/keep
+```
+
+`-p PrivateTmp=yes` is needed, as for 1.2.0: `ProtectSystem=strict` makes
+`/tmp` read-only and torch needs a writable temporary directory.
+`/srv/flare-nrt/keep` is inside `ReadWritePaths`, so the command reads it;
+it only reads from it.
+
+The one-off rebuilds every replay built before 1.3.0 (its `replay.json`
+has no `geometry`) and every replay marked incomplete, reusing the files it
+already has. For each frame with a result that has no heat frame it
+computes the Grad-CAM map: from the stored model input (2 days), else from
+the FITS (staging, then each `--fits-root`, laid out like staging:
+`<root>/YYYYMMDD/AIA….fits`). Each frame gets `alert` and `cam_peak`
+(recomputed if its map is gone). Each alert frame gets a location: the
+result's own, else computed from the 131 Å FITS. An event without a location
+gets its peak frame's, in `replay.json` and in `events.csv`
+(`/api/events`); a location already there is never changed. Where the FITS
+are gone, `replay.json` says what is missing (`missing["gradcam-heat"]`,
+`missing["location"]`, `note`), and the command prints it per event with
+the time, the maps recomputed and the peak RSS. Cost, measured on the M4.0 of 2026-07-07 in event 1's situation (45
+maps to recompute from the FITS): 44 s and 1.0 GB peak RSS on a desktop
+Ryzen with 2 threads, so ≈ 6–12 min on this server under `CPUQuota=100%`,
+next to the running loop; replays that already have their maps take
+seconds.
+`--event ID` limits it to one event; `--no-gradcam` skips loading the
+model. It can be run again at any time.
+
+Check event 1 (the command prints `event 1: … location yes, …`):
+
+```bash
+curl -s 127.0.0.1:5050/api/events/1/replay | python3 -c 'import json,sys; d=json.load(sys.stdin); \
+  print(d["event"]["location"]["method"], d["missing"]["gradcam-heat"], d["missing"]["location"])'
+```
+
+`diff131_rate_brightest_region_robust [] []` confirms why it had no
+location live (CHANGELOG 1.3.0, item 2); `diff131_rate_brightest_region`
+would mean the 131 Å rates were missing in the loop instead. Then
+`/srv/flare-nrt/keep` can be deleted.
+
+From then on the loop builds every new replay with the new fields. It
+holds the model already, so it computes the maps it lacks (only the slots
+of a backlog after a restart: the loop computes a Grad-CAM for its newest
+frame every slot) at ≈ 10 s each, once per event.
+
 ## Settings added in 1.1.0
 
 All optional, in `/etc/flare-nrt/flare-nrt.env`:
@@ -188,6 +253,6 @@ PNGs (INTEGRATION.md, "Resources").
 
 About 17–20 GB at steady state with the defaults (4 days of raw FITS),
 plus ≈ 0.5 GB for `render/` and the Grad-CAM maps and ≈ 3.5–6 GB per year
-of event replays (9.3 MB per event since 1.2.0; estimate; measure with
+of event replays (9.3 MB per event since 1.2.0, ≤ 1 MB more since 1.3.0; estimate; measure with
 `du -sh /srv/flare-nrt/events`).
 The breakdown is in INTEGRATION.md, "Resources".

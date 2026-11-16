@@ -1,9 +1,11 @@
-"""Event replays (1.1.0; 131 Å and the peak set since 1.2.0): a short
-movie of each event, kept for a year.
+"""Event replays (1.1.0; 131 Å and the peak set since 1.2.0; a Grad-CAM map
+on every frame with a result and the location since 1.3.0): a short movie
+of each event, kept for a year.
 
-    python -m flare_nrt.replays                 # build every pending, incomplete or pre-1.2.0 replay
+    python -m flare_nrt.replays                 # build every pending, incomplete or pre-1.3.0 replay
     python -m flare_nrt.replays --event 42      # one event (repeatable)
     python -m flare_nrt.replays --no-gradcam    # don't recompute missing Grad-CAM maps
+    python -m flare_nrt.replays --fits-root /srv/flare-nrt/keep   # more FITS, laid out like staging/ (repeatable)
 
 Once an event has been closed for ``replay_post_min`` (60 min), so the
 frames after it exist, its replay is built once: every 2-min slot from
@@ -16,11 +18,24 @@ as ``171.webp``, ``gradcam-heat.webp`` and (1.2.0) ``131.webp``:
   ``FLARE_NRT_FITS_DIRS``), exactly as ``/api/image/{wave}.png?kind=img&format=webp``
   (512 px), and the heat map from the stored Grad-CAM map
   (``gradcam/…cam.npz``);
-- else, only in this command (not in the loop, where it would hold the
-  stream back ~10 s per frame), the Grad-CAM is recomputed from the stored
-  model input (``tensors/``) or rebuilt from the FITS with the baselines the
-  result used. Same weights, same input: the same map the loop would have
-  made.
+- else the Grad-CAM is recomputed from the stored model input
+  (``tensors/``) or rebuilt from the FITS with the baselines the result
+  used. Same weights, same input: the same map the loop would have made.
+  Since 1.3.0 the loop does this too, with the model it already holds: it
+  computes a Grad-CAM for its newest frame every slot, so only the slots of
+  a backlog (after a restart) need one, ~10 s each; this command does it
+  for every replay it rebuilds.
+
+Each frame with a result (1.3.0) also says whether it alerted (``alert``),
+the map's maximum before normalisation (``cam_peak``, as ``X-Gradcam-Peak``)
+and, for alert frames, the experimental ``location`` (the brightest region
+of the 131 Å DN/s difference against the baselines the result used,
+flare_nrt/localize.py): the result's own, else computed here from the FITS.
+``geometry`` places helioprojective arcsec on the 512-px north-up images
+(``render.image_geometry``, from that frame's 131 Å header). An event
+without a location gets its peak frame's, in ``replay.json`` and in
+``events.csv`` (``/api/events``); a location already there is never
+changed.
 
 Once per event (1.2.0) it also keeps the peak frame (the slot of
 ``t_pmax``) as the portal shows a current one: ``peak/{131,171,304,1600}.webp``
@@ -47,7 +62,7 @@ the API never serves half of one and the loop and this command can run at
 the same time. The live loop builds replays itself (without recomputing
 Grad-CAM); this command is for events already in the archive at an
 upgrade: it rebuilds replays marked incomplete and those built before
-1.2.0 (no 131 Å, no peak set), reusing the files they already have."""
+1.3.0, reusing the files they already have."""
 
 from __future__ import annotations
 
@@ -55,6 +70,7 @@ import argparse
 import datetime as dt
 import logging
 import os
+import resource
 import shutil
 import sys
 import time
@@ -64,7 +80,8 @@ from . import __version__, render
 from .artifacts import _write, find_cam, gradcam_path, gradcam_png, tensor_path
 from .display import FitsLocator, render_path
 from .grid import CADENCE, CHANNELS, day_key, floor_slot, iso, parse_iso, utcnow
-from .store import ResultStore, read_events, read_json, write_json_atomic
+from .localize import locate, rate_from_fits
+from .store import ResultStore, fill_event_location, read_events, read_json, write_json_atomic
 
 log = logging.getLogger("flare_nrt.replays")
 
@@ -92,9 +109,11 @@ def peak_path(cfg, event_id: int, name: str) -> Path:
 
 
 def current(doc: dict | None) -> bool:
-    """Built by 1.2.0 or later: has the 131 Å frames and the peak set (or
-    says they are missing)."""
-    return bool(doc) and "peak" in doc and all(c in (doc.get("missing") or {}) for c in REPLAY_CHANNELS)
+    """Built by 1.3.0 or later: has the 131 Å frames, the peak set, the
+    per-frame Grad-CAM fields, the locations and the geometry (or says what
+    is missing)."""
+    return (bool(doc) and "geometry" in doc and "location" in (doc.get("peak") or {})
+            and all(c in (doc.get("missing") or {}) for c in (*REPLAY_CHANNELS, "peak", "location")))
 
 
 def read_replay(cfg, event_id: int) -> dict | None:
@@ -127,6 +146,7 @@ class GradcamRecompute:
 
         self.cfg, self.ens, self.loc = cfg, ensemble, locator
         self.v_high = load_norm_stats(cfg.norm_stats)
+        self.n = 0          # maps recomputed (reported by the command)
 
     def _current(self, slot: dt.datetime):
         from .preprocess import build_current
@@ -161,12 +181,73 @@ class GradcamRecompute:
                     return None
                 x = build_input(cur, bls)
             cam = self.ens.gradcam(x).numpy()
+            self.n += 1
         except Exception:
             log.exception("Grad-CAM recompute for %s failed", iso(slot))
             return None
         # x[0] is the 131 Å channel the model saw: the overlay's underlay
         return {"cam": cam, "peak": float(cam.max()), "probability": row.get("probability"),
                 "limb": render.limb_from_header(header or {}), "base131": x[0].float().numpy()}
+
+
+class FitsInfo:
+    """131 Å DN/s maps and headers of the window's slots, read once per
+    build from the FITS (staging, ``--fits-root``, ``FLARE_NRT_FITS_DIRS``)."""
+
+    def __init__(self, locator: FitsLocator):
+        self.loc = locator
+        self._rate: dict[str, tuple] = {}
+        self._hdr: dict[str, dict | None] = {}
+
+    def rate(self, slot: dt.datetime):
+        k = iso(slot)
+        if k not in self._rate:
+            p = self.loc.existing(slot, 131)
+            try:
+                self._rate[k] = rate_from_fits(p) if p is not None else (None, None)
+            except Exception:
+                log.exception("131 Å of %s from %s failed", k, p)
+                self._rate[k] = (None, None)
+            if self._rate[k][1] is not None:
+                self._hdr[k] = self._rate[k][1]
+        return self._rate[k][0]
+
+    def header(self, slot: dt.datetime) -> dict | None:
+        k = iso(slot)
+        if k not in self._hdr:
+            self._hdr[k] = None
+            p = self.loc.existing(slot, 131)
+            if p is not None:
+                from astropy.io import fits
+
+                try:
+                    with fits.open(p) as h:
+                        hdu = next((h[i] for i in (1, 0) if i < len(h) and h[i].header.get("NAXIS")), None)
+                        self._hdr[k] = dict(hdu.header) if hdu is not None else None
+                except Exception:
+                    log.exception("header of %s failed", p)
+        return self._hdr[k]
+
+    def geometry(self, slot: dt.datetime) -> dict | None:
+        h = self.header(slot)
+        return render.image_geometry(h) if h else None
+
+    def location(self, slot: dt.datetime, row: dict) -> dict | None:
+        """``localize`` on the 131 Å DN/s difference against the row's baselines."""
+        bl = [parse_iso(b) for b in row.get("baseline_slots") or []]
+        cur = self.rate(slot)
+        if cur is None or not bl:
+            return None
+        return locate(cur, [self.rate(b) for b in bl], self.header(slot) or {})
+
+
+def is_alert_row(row: dict, threshold: float) -> bool | None:
+    """The row's alert (p ≥ threshold); None without a probability."""
+    if row.get("probability") is None:
+        return None
+    if "alert" in row:
+        return bool(row["alert"])
+    return row["probability"] >= row.get("threshold", threshold)
 
 
 def _rows(cfg, start: dt.datetime, end: dt.datetime) -> dict[str, dict]:
@@ -189,10 +270,14 @@ def _note(missing: dict, n_slots: int) -> str | None:
         parts.append(f"{len(missing['gradcam-heat'])} results have no Grad-CAM")
     if missing["peak"]:
         parts.append(f"the peak frame lacks {', '.join(missing['peak'])}")
-    if not parts:
-        return None
-    return ("; ".join(parts) + ": their files were gone or never made (service down, input missing, "
-            "backlog processed without Grad-CAM, FITS past their 4 days)")
+    out = []
+    if parts:
+        out.append("; ".join(parts) + ": their files were gone or never made (service down, input missing, "
+                   "backlog processed without Grad-CAM, FITS past their 4 days)")
+    if missing.get("location"):
+        out.append(f"{len(missing['location'])} alert frames have no location: the 131 Å FITS of the frame or "
+                   "of its baselines were gone, or 131 Å did not brighten anywhere")
+    return ". ".join(out) or None
 
 
 def build(cfg, ev: dict, now: dt.datetime | None = None, locator: FitsLocator | None = None,
@@ -205,14 +290,25 @@ def build(cfg, ev: dict, now: dt.datetime | None = None, locator: FitsLocator | 
     rows = _rows(cfg, start, end)
     final = replay_dir(cfg, eid)
     prev_doc = read_json(final / "replay.json") or {}
-    # files of this event's earlier (incomplete or pre-1.2.0) replay are reused, not rendered or recomputed again
+    # files of this event's earlier (incomplete or pre-1.3.0) replay are reused, not rendered or recomputed again
     same = (prev_doc.get("event") or {}).get("t_start") == ev["t_start"]
     prev = final / "frames" if same else None
+    prev_frames = {f["slot"]: f for f in prev_doc.get("frames") or []} if same else {}
     tmp = cfg.replays_dir / f".{eid}.tmp-{os.getpid()}"
     shutil.rmtree(tmp, ignore_errors=True)
     q = cfg.webp_quality
-    frames, missing = [], {c: [] for c in (*REPLAY_CHANNELS, "peak")}
+    frames, missing = [], {c: [] for c in (*REPLAY_CHANNELS, "peak", "location")}
     recomputed: dict[str, dict | None] = {}
+    info = FitsInfo(loc)
+    locations: dict[str, dict | None] = {}
+
+    def location_of(slot: dt.datetime, row: dict) -> dict | None:
+        """The result's own location, else this replay's earlier one, else from the FITS."""
+        k = iso(slot)
+        if k not in locations:
+            locations[k] = (row.get("location") or (prev_frames.get(k) or {}).get("location")
+                            or info.location(slot, row))
+        return locations[k]
 
     def cam_of(slot: dt.datetime, row: dict) -> dict | None:
         """Stored map, else (this command only) recomputed once per slot."""
@@ -250,26 +346,50 @@ def build(cfg, ev: dict, now: dt.datetime | None = None, locator: FitsLocator | 
                 missing[ch].append(iso(slot))
         if have:
             inputs = row.get("inputs") or {}
+            pf = prev_frames.get(iso(slot)) or {}
+            alert = is_alert_row(row, cfg.threshold)
+            cam_peak = pf.get("cam_peak")
+            if cam_peak is None and row.get("status") == "ok" and (cam := cam_of(slot, row)) is not None:
+                cam_peak = round(float(cam["peak"]), 6)
+            location = location_of(slot, row) if alert else None
+            if alert and location is None:
+                missing["location"].append(iso(slot))
             frames.append({"slot": iso(slot), "t_obs": inputs.get("171"), "probability": row.get("probability"),
-                           "state": row.get("state"), "status": row.get("status"), "images": have})
+                           "state": row.get("state"), "status": row.get("status"), "images": have,
+                           "alert": alert, "cam_peak": cam_peak, "location": location,
+                           "geometry": info.geometry(slot) or pf.get("geometry")})
         slot += CADENCE
 
     peak = _build_peak(cfg, ev, tmp, final if same and (prev_doc.get("peak") or {}).get("slot") else None,
                        prev_doc.get("peak") or {}, rows, loc, cam_of, eid)
     missing["peak"] = [n for n in PEAK_FILES if n not in peak["images"]]
-    complete = not any(missing.values())
+    # 1.3.0: the peak frame's location and geometry; the event's location if it had none
+    pslot = parse_iso(peak["slot"])
+    prow = rows.get(peak["slot"]) or {}
+    prev_peak = (prev_doc.get("peak") or {}) if same else {}
+    peak["location"] = location_of(pslot, prow) or prev_peak.get("location")
+    peak["geometry"] = info.geometry(pslot) or prev_peak.get("geometry")
+    ev_location = ev.get("location") or peak["location"]
+    if not ev.get("location") and ev_location and fill_event_location(cfg.events_path, eid, ev["t_start"],
+                                                                      ev_location):
+        log.info("event %d: location filled from its peak frame %s", eid, peak["slot"])
+    # complete: every image there (a missing location is listed and explained, not counted)
+    complete = not any(v for k, v in missing.items() if k != "location")
+    geometry = peak["geometry"] or next((f["geometry"] for f in frames if f.get("geometry")), None)
     doc = {
         "schema": SCHEMA,
         "event": {"event_id": eid, "t_start": ev["t_start"], "t_peak": ev["t_pmax"], "t_end": ev["t_end"],
-                  "p_max": ev["p_max"], "n_alert_frames": ev.get("n_alert_frames"), "location": ev.get("location")},
+                  "p_max": ev["p_max"], "n_alert_frames": ev.get("n_alert_frames"), "location": ev_location},
         "window": {"start": iso(start), "end": iso(end), "pre_min": cfg.replay_pre_min,
                    "post_min": cfg.replay_post_min},
         "n_slots": n_slots,
+        "threshold": cfg.threshold,
+        "geometry": geometry,
         "frames": frames,
         "peak": peak,
         "complete": complete,
         "missing": missing,
-        "note": None if complete else _note(missing, n_slots),
+        "note": _note(missing, n_slots),
         "built_at": iso(now),
         "model_version": __version__,
     }
@@ -333,7 +453,7 @@ def pending(cfg, now: dt.datetime, last_slot: dt.datetime | None = None, rebuild
             only: set[int] | None = None, force: bool = False) -> list[dict]:
     """Closed events within ``replay_days`` whose replay is due: never built,
     built for another event with the same id, or (``rebuild_incomplete``, the
-    one-off command) marked incomplete or built before 1.2.0."""
+    one-off command) marked incomplete or built before 1.3.0."""
     cutoff = now - dt.timedelta(days=cfg.replay_days)
     out = []
     for ev in read_events(cfg.events_path):
@@ -352,11 +472,13 @@ class ReplayBuilder:
     """Called by the live loop after each poll; checks at most every
     ``every_sec`` and never raises."""
 
-    def __init__(self, cfg, every_sec: int = 300):
+    def __init__(self, cfg, ensemble=None, every_sec: int = 300):
         self.cfg = cfg
         self.every = every_sec
         self._last = 0.0
         self.locator = FitsLocator(cfg)
+        # 1.3.0: with the loop's model, a frame without a stored map gets one (backlog slots)
+        self.gradcam = GradcamRecompute(cfg, ensemble, self.locator) if ensemble is not None else None
 
     def maybe_run(self, now: dt.datetime, last_slot: dt.datetime | None) -> list[int]:
         if time.time() - self._last < self.every:
@@ -365,7 +487,7 @@ class ReplayBuilder:
         built = []
         try:
             for ev in pending(self.cfg, now, last_slot):
-                build(self.cfg, ev, now, self.locator)
+                build(self.cfg, ev, now, self.locator, self.gradcam)
                 built.append(int(ev["event_id"]))
         except Exception:
             log.exception("building event replays failed")
@@ -378,6 +500,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-gradcam", action="store_true",
                     help="don't load the model to recompute Grad-CAM maps that are no longer stored")
     ap.add_argument("--force", action="store_true", help="rebuild even complete replays")
+    ap.add_argument("--fits-root", action="append", default=[], metavar="PATH",
+                    help="more FITS laid out like the staging dir (PATH/YYYYMMDD/AIA….fits), "
+                         "searched after it (repeatable)")
     ap.add_argument("--data-dir", help="override FLARE_NRT_DATA_DIR")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -387,6 +512,11 @@ def main(argv=None) -> int:
     cfg = Settings()
     if a.data_dir:
         cfg.data_dir = Path(a.data_dir)
+    roots = [Path(r) for r in a.fits_root]
+    for r in roots:
+        if not r.is_dir():
+            log.warning("--fits-root %s: not a directory", r)
+    cfg.fits_roots = [*roots, *cfg.fits_roots]
     cfg.ensure_dirs()
     now = utcnow()
     todo = pending(cfg, now, None, rebuild_incomplete=True, only=set(a.event or []), force=a.force)
@@ -405,9 +535,17 @@ def main(argv=None) -> int:
     rc = 0
     for ev in todo:
         try:
+            t0, n0 = time.perf_counter(), gradcam.n if gradcam else 0
             doc = build(cfg, ev, now, loc, gradcam)
+            m = doc["missing"]
+            lost = {k: len(v) for k, v in m.items() if v and k != "peak"}
             print(f"event {doc['event']['event_id']}: {len(doc['frames'])}/{doc['n_slots']} frames, "
-                  f"{'complete' if doc['complete'] else 'incomplete'}")
+                  f"{'complete' if doc['complete'] else 'incomplete'}, "
+                  f"location {'yes' if doc['event']['location'] else 'none'}, "
+                  f"{(gradcam.n if gradcam else 0) - n0} Grad-CAM maps recomputed, "
+                  f"{time.perf_counter() - t0:.1f} s, peak RSS "
+                  f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024:.0f} MB"
+                  + (f"; missing: {lost}" if lost else "") + (f", peak {m['peak']}" if m["peak"] else ""))
         except Exception:
             log.exception("replay of event %s failed", ev["event_id"])
             rc = 1

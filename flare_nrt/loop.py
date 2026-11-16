@@ -27,7 +27,7 @@ from .config import Settings
 from .detector import EventTracker, FrameBuffer, baseline_slots, is_alert
 from .display import write_result_renders
 from .grid import CADENCE, CHANNELS, day_key, floor_slot, iso, parse_datetime, parse_iso, utcnow
-from .localize import localize, rate_map
+from .localize import METHOD_ROBUST, locate, rate_from_fits, rate_map
 from .model import Ensemble
 from .preprocess import build_current, build_input, load_norm_stats
 from .qc import QualityControl
@@ -57,6 +57,21 @@ def aia131_excess(cur, bls) -> float | None:
         return None
     ref = float(np.mean([np.nansum(b) for b in bls]))
     return round(float(np.nansum(cur)) / ref - 1.0, 6) if ref > 0 else None
+
+
+def event_location(loc: dict | None, tracker: EventTracker, slot: dt.datetime) -> dict | None:
+    """What the event tracker may keep of an alert frame's location (1.3.0).
+    The tracker keeps the location of the event's highest-probability frame.
+    A location found by the robust fallback (``METHOD_ROBUST``, after the
+    131 Å maximum: post-flare loops, not the kernel) is offered only while
+    the event has none, so every event 1.2.0 located keeps that location
+    and an event it could not locate gets one."""
+    if not loc or loc.get("method") != METHOD_ROBUST:
+        return loc
+    ev = tracker.current
+    if ev is None or slot - parse_iso(ev.t_end) > tracker.gap:    # this slot opens a new event
+        return loc
+    return None if ev.location else loc
 
 
 def signal_state(opened: bool, alert: bool, is_open: bool) -> str:
@@ -161,10 +176,7 @@ class Processor:
                 prob, scores = self.ens.predict(x)
                 latency_ms = round(1000 * (time.perf_counter() - t0))
                 alert = is_alert(prob, cfg.threshold)
-                loc = None
-                if alert and slot in self.rate131 and all(s in self.rate131 for s in used):
-                    diff = self.rate131[slot] - sum(self.rate131[s] for s in used) / len(used)
-                    loc = localize(diff, self.headers.get(slot, {}))
+                loc = self._locate(slot, used) if alert else None
                 row["aia131_excess"] = aia131_excess(self.rate131.get(slot), [self.rate131.get(s) for s in used])
                 row.update(status="ok", probability=round(prob, 6), raw_score=round(prob, 6), alert=alert,
                            ensemble_scores=[round(v, 6) for v in scores],
@@ -180,7 +192,8 @@ class Processor:
                 if self.render:
                     p171 = (self.src.paths(slot) or {}).get(171)
                     write_result_renders(cfg, slot, p171, [(self.src.paths(s) or {}).get(171) for s in used], cam)
-        ev_id, opened, closed = self.tracker.update(slot, alert, prob or 0.0, row.get("location"))
+        ev_id, opened, closed = self.tracker.update(slot, alert, prob or 0.0,
+                                                    event_location(row.get("location"), self.tracker, slot))
         if closed:
             append_event(cfg.events_path, closed)
             log.info("event %d closed: %s → %s, p_max %.3f", closed.event_id, closed.t_start,
@@ -198,6 +211,35 @@ class Processor:
         if row["status"] == "ok":
             self._write_status(row)
         return row
+
+    def _rate(self, slot: dt.datetime):
+        """131 Å DN/s of a slot: kept from preprocessing, else read from its
+        FITS (1.3.0), so a location never depends on what is in memory."""
+        if slot in self.rate131:
+            return self.rate131[slot]
+        p = (self.src.paths(slot) or {}).get(131)
+        if p is None:
+            return None
+        try:
+            rate, header = rate_from_fits(p)
+        except Exception:
+            log.exception("131 Å rate of %s from %s failed", iso(slot), p)
+            return None
+        self.headers.setdefault(slot, header)
+        return rate
+
+    def _locate(self, slot: dt.datetime, used: list[dt.datetime]) -> dict | None:
+        """The alert frame's location: 131 Å DN/s difference against the
+        baselines the result used (flare_nrt/localize.py)."""
+        cur, bls = self._rate(slot), [self._rate(s) for s in used]
+        if cur is None or any(b is None for b in bls):
+            log.warning("alert at %s: no location, 131 Å FITS missing for %s", iso(slot),
+                        ", ".join(iso(s) for s, r in zip([slot, *used], [cur, *bls], strict=True) if r is None))
+            return None
+        loc = locate(cur, bls, self.headers.get(slot, {}))
+        if loc is None:
+            log.warning("alert at %s: no location, no significant 131 Å brightening", iso(slot))
+        return loc
 
     def _write_status(self, row: dict) -> None:
         open_ev = self.tracker.current
@@ -297,7 +339,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
         return proc
 
     retention = Retention(cfg, every_sec=600 if cfg.staging_hours > 0 else 3600)
-    replays = ReplayBuilder(cfg)
+    replays = ReplayBuilder(cfg, ens)   # 1.3.0: the loaded model fills missing Grad-CAM maps
     st = read_json(cfg.loop_state_path, {}) or {}
     now = started = utcnow()
     nxt = floor_slot(now - dt.timedelta(minutes=20))

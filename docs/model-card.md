@@ -52,6 +52,10 @@ or smoothing: `raw_score` is the same number.
   global v_high per channel.
 - **Events:** alerts less than 10 min apart are one event.
 - **Location:** the brightest region of the 131 Å difference in DN/s.
+  Since 1.3.0, when no region stands above mean + 5σ of the difference
+  (after a flare's 131 Å maximum the baselines hold the flare), σ is taken
+  from the median absolute deviation instead (`method` `…_robust`); every
+  location the first rule finds is unchanged.
 - **Grad-CAM:** on each member's last block (`layer4`), averaged over the
   members.
 
@@ -66,7 +70,11 @@ images are rescaled so limb darkening and plage are visible; frames are
 pre-rendered as WebP for playback, and each event keeps a one-year replay.
 Version 1.2.0 (display only as well) adds 131 Å to each replay frame and
 keeps each event's peak frame (4 channels, both Grad-CAM styles) for the
-year, so an old event's peak can be shown like a current one.
+year, so an old event's peak can be shown like a current one. Version
+1.3.0 gives every replay frame with a result its Grad-CAM heat map, and
+every alert frame and event a location (the robust fallback above; an
+event's location is never replaced by a robust one); detection is
+unchanged.
 
 Code: `HelioUSACH/flare-nrt` (`flare_nrt/`).
 
@@ -197,7 +205,10 @@ will be updated from those reports.
   the 131 Å difference: median 14″ from the catalogue position, 89 % within
   120″ (36 M/X, calibration month). Limb flares and simultaneous flares in
   two regions are its expected failure cases; the per-flare list is in
-  the validation report (`location.flares`).
+  the validation report (`location.flares`). The robust fallback (1.3.0)
+  is not validated: on the M4.0 of 2026-07-07 it located 4 alert frames
+  after the 131 Å maximum 27–232″ from the kernel, on the post-flare loops
+  and the eruption. It is the 131 Å brightening, not the Grad-CAM.
 
 ## Maintainers / links
 

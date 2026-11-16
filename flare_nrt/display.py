@@ -37,9 +37,11 @@ def render_path(root: Path, slot: dt.datetime, channel: str) -> Path:
 
 
 class FitsLocator:
-    """Where the FITS of a slot is: ``staging/YYYYMMDD/`` first, then the
-    read-only trees of ``FLARE_NRT_FITS_DIRS`` by file name (indexed, rebuilt
-    at most every 10 min)."""
+    """Where the FITS of a slot is: ``staging/YYYYMMDD/`` first, then each
+    of ``fits_roots`` laid out the same way (``<root>/YYYYMMDD/``; 1.3.0,
+    ``python -m flare_nrt.replays --fits-root``), then the read-only trees of
+    ``FLARE_NRT_FITS_DIRS`` by file name (indexed, rebuilt at most every 10
+    min)."""
 
     def __init__(self, cfg):
         self.cfg = cfg
@@ -60,7 +62,13 @@ class FitsLocator:
     def path(self, slot: dt.datetime, wave: int) -> Path:
         """The file, or its (missing) staging path."""
         p = self.cfg.staging_dir / day_key(slot) / file_name(slot, wave)
-        return p if p.exists() else (self._indexed(p.name) or p)
+        if p.exists():
+            return p
+        for root in getattr(self.cfg, "fits_roots", None) or []:
+            q = Path(root) / day_key(slot) / p.name
+            if q.exists():
+                return q
+        return self._indexed(p.name) or p
 
     def existing(self, slot: dt.datetime, wave: int) -> Path | None:
         p = self.path(slot, wave)

@@ -84,6 +84,9 @@ class Settings:
     # read-only trees with more AIA FITS (AIAYYYYMMDD_HHMM_WWWW.fits, any depth), searched
     # by the API after staging/: e.g. the FITS a month's replay was run on
     fits_dirs: list = field(default_factory=lambda: [Path(p) for p in _env("FITS_DIRS", "").split(os.pathsep) if p])
+    # directories laid out like staging/ (<root>/YYYYMMDD/AIA….fits), searched right
+    # after it (1.3.0): e.g. FITS kept aside for a replay (replays --fits-root)
+    fits_roots: list = field(default_factory=lambda: [Path(p) for p in _env("FITS_ROOTS", "").split(os.pathsep) if p])
     # GOES flare list for the viewer (CSV: tstart,tpeak,tend,fclass); default: the
     # curated archive's flares.csv files
     flares_csv: str = field(default_factory=lambda: _env("FLARES_CSV", ""))

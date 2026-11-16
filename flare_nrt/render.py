@@ -154,6 +154,28 @@ def limb_from_header(header: dict, size: int = SIZE) -> list[float] | None:
         return None
 
 
+def image_geometry(header: dict, size: int = SIZE) -> dict | None:
+    """Where helioprojective arcsec fall on the ``size``-px north-up image
+    (1.3.0), from a FITS header, in the convention of ``localize``: pixel
+    coordinates from the image's top-left corner (x right = west, y down =
+    south), so pixel (i, j) covers [i, i+1) × [j, j+1). A point at (x″, y″)
+    is at ``col = cx + x / ax``, ``row = cy − y / ay`` with
+    ``disk_center_px = [cx, cy]`` and ``arcsec_per_px = [ax, ay]``. None
+    without the keys."""
+    try:
+        s = float(header.get("NAXIS1") or 1024) / size
+        ax = float(header["CDELT1"]) * s
+        ay = float(header.get("CDELT2") or header["CDELT1"]) * s
+        rsun = float(header["RSUN_OBS"])
+        cx = (float(header["CRPIX1"]) - 0.5) / s
+        cy = size - (float(header["CRPIX2"]) - 0.5) / s
+        return {"size_px": size, "disk_center_px": [round(cx, 3), round(cy, 3)],
+                "disk_radius_px": round(rsun / ax, 3), "arcsec_per_px": [round(ax, 5), round(ay, 5)],
+                "rsun_arcsec": round(rsun, 3)}
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def heat_rgba(cam: np.ndarray, limb: list[float] | None) -> np.ndarray:
     """The Grad-CAM map alone, FITS row order (float in [0, 1], or uint8
     0–255) → (H, W, 4) uint8: normalised to its own maximum, inferno, alpha 0
