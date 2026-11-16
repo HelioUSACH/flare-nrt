@@ -4,14 +4,18 @@ append-only, so a crash never leaves a half-written file the API would serve.
 - ``results/YYYYMMDD.jsonl``: one line per processed slot, every status
   (``ok``, ``qc_reject``, ``missing``, ``no_baseline``). This is the
   producer's permanent record and the source for curation and validation.
-- ``events.csv``: one row per closed event.
+- ``events.csv``: one row per closed event. Appended by the loop; since
+  1.3.0 an empty ``location`` can be filled in once by a replay build
+  (``fill_event_location``), under the same lock (``events.csv.lock``).
 - ``state/status.json``: the latest result, read by the API on each request.
 - ``state/loop_state.json``: what a restart needs (last slot, open event).
 """
 
 from __future__ import annotations
 
+import contextlib
 import csv
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -82,15 +86,52 @@ class ResultStore:
         return rows
 
 
+@contextlib.contextmanager
+def _events_lock(path: Path):
+    """Exclusive between the loop's appends and a location fill (another
+    process), on a separate file: the fill replaces events.csv."""
+    lock = Path(path).with_name(Path(path).name + ".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def append_event(path: Path, ev: Event) -> None:
-    new = not Path(path).exists()
-    with open(path, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=EVENT_FIELDS)
-        if new:
+    with _events_lock(path):
+        new = not Path(path).exists()
+        with open(path, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=EVENT_FIELDS)
+            if new:
+                w.writeheader()
+            row = {k: getattr(ev, k) for k in EVENT_FIELDS}
+            row["location"] = json.dumps(ev.location) if ev.location else ""
+            w.writerow(row)
+
+
+def fill_event_location(path: Path, event_id: int, t_start: str, location: dict | None) -> bool:
+    """Sets the location of the event (``event_id`` that started at
+    ``t_start``) if it has none (1.3.0); never changes one. True if filled."""
+    if not location or not Path(path).exists():
+        return False
+    with _events_lock(path):
+        with open(path, newline="") as f:
+            rows = list(csv.DictReader(f))
+        hit = [r for r in rows if str(r.get("event_id")) == str(int(event_id)) and r.get("t_start") == t_start]
+        if not hit or any(r.get("location") for r in hit):
+            return False
+        for r in hit:
+            r["location"] = json.dumps(location)
+        tmp = Path(path).with_suffix(".csv.tmp")
+        with open(tmp, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=EVENT_FIELDS, extrasaction="ignore")
             w.writeheader()
-        row = {k: getattr(ev, k) for k in EVENT_FIELDS}
-        row["location"] = json.dumps(ev.location) if ev.location else ""
-        w.writerow(row)
+            w.writerows(rows)
+        os.replace(tmp, path)
+        return True
 
 
 def read_events(path: Path) -> list[dict]:

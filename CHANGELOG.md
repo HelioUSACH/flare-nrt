@@ -1,5 +1,89 @@
 # Changelog
 
+## 1.3.0
+
+What an event replay shows, and where an event is. **The model is
+unchanged**: same weights (same two release files, same SHA-256), same
+normalisation, threshold, baselines, state machine and alert rule
+(`tests/test_snapshot.py` passes unchanged; `flare_nrt/model.py`,
+`preprocess.py`, `detector.py`, `qc.py` and `tests/fixtures/` are
+byte-identical to `v1.2.0`). Every probability, alert and event is the
+one 1.2.0 gives; what changes is the experimental location of frames the
+1.0.0 rule could not locate (item 2). Every 1.2.0 endpoint answers as
+before; `replay.json` and `events.csv` only gain fields or fill an empty
+one.
+
+1. **A Grad-CAM map on every replay frame with a result.** Every slot
+   whose result is `ok`, alerting or not, gets `gradcam-heat.webp` (same
+   rendering). The loop already computes one for its newest frame every
+   slot; frames without one (a backlog after a restart) now get it when
+   the replay is built: the loop passes its loaded model to the replay
+   builder, which recomputes the map from the stored input or the FITS
+   (~10 s per such frame on the server, usually none). Each frame in
+   `replay.json` gains `alert` (p ≥ threshold, null without a result) and
+   `cam_peak` (the map's maximum before normalisation, as
+   `X-Gradcam-Peak`); `replay.json` gains `threshold`.
+2. **Why event 1 had no location, and the fix.** Not a restart: after a
+   restart the loop's buffer starts empty and recomputes the 131 Å rates
+   with every frame it reads, so they were always there. `localize` found
+   no region: it requires the region to stand above mean + 5σ of the
+   difference, and after a flare's 131 Å maximum the baselines (t−8…−12
+   min) hold the flare, so the difference has a deep negative lobe whose σ
+   exceeds every positive value. On the M4.0 of 2026-07-07 that left 9 of
+   64 frames (14:28–14:44 UT) without a location, 4 of them alerts,
+   including the peak-probability frame. Event 1 (one alert frame after
+   p rose for 20 min) fits this, but its FITS are only on the server, so
+   it is confirmed there: after the one-off, `event.location.method` in
+   its `replay.json` is `…_robust` if this was the cause, and the first
+   rule's method if the rates were missing live after all (deploy/README.md).
+   Now, only when that test finds nothing, σ
+   is taken from the median absolute deviation (`method`
+   `diff131_rate_brightest_region_robust`). Every location the first rule
+   finds is unchanged. These new locations are not validated: on the
+   M4.0 they fall 27–232″ from the kernel, on the post-flare loops and
+   the eruption next to it, so the loop never lets one replace an event's
+   location (an event keeps the one 1.2.0 gave it; one with none takes
+   it). The loop also reads 131 Å rates it does not hold in memory from
+   the FITS, and logs an alert frame it cannot locate and why.
+3. **Every event gets a location.** When a replay is built, alert frames
+   without a location get one computed from the 131 Å FITS against the
+   baselines their result used; an event without a location gets its peak
+   frame's, in `replay.json` (`event.location`, `peak.location`) and in
+   `events.csv` (`/api/events`): filled once under a lock shared with the
+   loop's appends, never changed. Frames: `location` for alert frames,
+   null otherwise; `missing["location"]` lists alert frames left without
+   one (FITS gone, or no brightening) and `note` says why. INTEGRATION.md
+   has a "Location" section: what it is (the 131 Å brightening, not the
+   Grad-CAM), its two methods and its limits.
+4. **Image geometry.** `frames[].geometry`, `peak.geometry` and the
+   replay's `geometry` (the peak frame's): disk centre and radius in px
+   and arcsec per px on the 512-px north-up images, from that frame's
+   131 Å header (`render.image_geometry`, the convention of `localize` and
+   of the heat maps' limb circle), with the formula to place a location.
+5. **One-off rebuild, `--fits-root`.** `python -m flare_nrt.replays`
+   rebuilds replays built before 1.3.0 (no `geometry`), reusing their
+   files, adding maps for non-alert frames, `cam_peak`, locations and
+   geometry. `--fits-root PATH` (repeatable; also `FLARE_NRT_FITS_ROOTS`):
+   directories laid out like staging (`PATH/YYYYMMDD/…`), searched right
+   after it; event 1's FITS are in `/srv/flare-nrt/keep/20261111`. It
+   prints per event the frames, the location, the maps recomputed, the time
+   and the peak RSS, and what is missing.
+6. **Measured** (M4.0 of 2026-07-07, real weights, 2 threads, Ryzen 7
+   7700X): a replay as the loop builds it, 3.3 s, nothing recomputed,
+   +13 kB per event (`replay.json` 11 → 24 kB; the heat frames were
+   already there); in event 1's situation (maps of the alert frames only,
+   FITS under `--fits-root`) the one-off recomputed 45 maps in 43.6 s at
+   1.0 GB peak RSS (model loaded once per run), +0.96 MB on disk (45 heat
+   frames, 21 kB each). The recomputed maps equal the loop's (`cam_peak`
+   identical on all 54 frames). Unit limits unchanged.
+
+Also: version 1.3.0 (`pyproject.toml`, `flare_nrt.__version__`,
+`model_version`, INTEGRATION.md, deploy/README.md, which has the upgrade
+steps from 1.2.0 with the one-off and `--fits-root /srv/flare-nrt/keep`);
+`fetch_weights` reads the `v1.3.0` release, which carries the same two
+files as `v1.0.0`–`v1.2.0`; model card: the robust fallback and its
+limits.
+
 ## 1.2.0
 
 Display only, like 1.1.0: what an event replay keeps. **The model is

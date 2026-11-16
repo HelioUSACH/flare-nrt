@@ -175,7 +175,7 @@ def test_one_off_adds_the_new_files_to_110_replays(cfg, monkeypatch):
     assert replays.main(["--no-gradcam"]) == 0
 
     doc = replays.read_replay(cfg, 21)
-    assert doc["complete"] and replays.current(doc) and doc["model_version"] == "1.2.0"
+    assert doc["complete"] and replays.current(doc) and doc["model_version"] == replays.__version__
     assert all(f["images"] == ["171", "gradcam-heat", "131"] for f in doc["frames"])
     assert marker.read_bytes() == b"kept from the 1.1.0 replay"                # reused, not re-rendered
     assert sorted(p.stem for p in (replays.replay_dir(cfg, 21) / "peak").iterdir()) == sorted(replays.PEAK_FILES)

@@ -58,7 +58,8 @@ python -m flare_nrt.curate                                  # daily: archive + l
 python -m flare_nrt.validate --start 2026-10-21 --end 2026-10-27   # vs GOES and vs the baseline rule
 python -m flare_nrt.loop --replay /path/to/fits             # replay stored FITS through the same code
 python -m flare_nrt.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv   # GOES list of a past period
-python -m flare_nrt.replays                                 # one-off: replays missing, incomplete or from before 1.2.0
+python -m flare_nrt.replays                                 # one-off: replays missing, incomplete or from before 1.3.0
+python -m flare_nrt.replays --fits-root /path/keep           # … with more FITS laid out like staging/ (keep/YYYYMMDD/)
 ```
 
 On the server, run the one-off as the service user under the units'
@@ -73,7 +74,7 @@ systemd-run --wait --pty --uid=flare-nrt --gid=flare-nrt -p WorkingDirectory=/op
 ```
 
 The loop builds each new event's replay itself (deploy/README.md,
-"Upgrade from 1.1.0 to 1.2.0").
+"Upgrade from 1.2.0 to 1.3.0", which adds `--fits-root /srv/flare-nrt/keep`).
 
 `http://127.0.0.1:5050/viewer` is a retrospective viewer. It lets you
 scrub through any period frame by frame: the probability over time, the 4
