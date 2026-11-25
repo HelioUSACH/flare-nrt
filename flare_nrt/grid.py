@@ -73,6 +73,29 @@ def file_url(base: str, slot: dt.datetime, wave: int) -> str:
     return f"{base}/{slot:%Y/%m/%d}/H{slot:%H}00/{file_name(slot, wave)}"
 
 
+# 1.3.1: JSOC's near-real-time archive, current to ~20 min (the dated one above
+# lags weeks). File names carry seconds; its cadence is 3 min, not 2.
+NRT_FILE_RE = re.compile(r"AIA(\d{8})_(\d{6})_(\d{4})\.fits")
+
+
+def nrt_dir_url(base: str, t: dt.datetime) -> str:
+    """``{base}/nrt/YYYY/MM/DD/HHH00/``: one hour of near-real-time images."""
+    return f"{base}/nrt/{t:%Y/%m/%d}/H{t:%H}00/"
+
+
+def nrt_file_name(t: dt.datetime, wave: int) -> str:
+    return f"AIA{t:%Y%m%d_%H%M%S}_{wave:04d}.fits"
+
+
+def parse_nrt_listing(html: str) -> list[tuple[dt.datetime, int, str]]:
+    """(image time, channel, file name) of each image named in a directory listing."""
+    out = {}
+    for m in NRT_FILE_RE.finditer(html):
+        t = dt.datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S").replace(tzinfo=dt.timezone.utc)
+        out[m.group(0)] = (t, int(m.group(3)), m.group(0))
+    return sorted(out.values())
+
+
 def parse_file_name(name: str) -> tuple[dt.datetime, int] | None:
     m = FILE_RE.search(name)
     if not m:

@@ -5,7 +5,7 @@ check is tests/test_real_weights.py (skipped unless FLARE_NRT_REAL_WEIGHTS is se
 import datetime as dt
 import json
 
-from conftest import T0, write_slot
+from conftest import T0, FakeSession, write_slot
 from fastapi.testclient import TestClient
 
 from flare_nrt import curate
@@ -190,21 +190,9 @@ def test_mostrecent_is_filed_under_its_own_slot(cfg, tmp_path):
     blobs = {w: (src_dir / f"{slot:%Y%m%d}" / f"AIA{slot:%Y%m%d}_{slot:%H%M}_{w:04d}.fits").read_bytes()
              for w in (131, 171, 304, 1600)}
 
-    class Resp:
-        def __init__(self, code, content=b""):
-            self.status_code, self.content = code, content
-
-    class Session:
-        headers = {}
-
-        def get(self, url, timeout=None):
-            for w, b in blobs.items():
-                if url.endswith(f"/mostrecent/AIAsynoptic{w:04d}.fits"):
-                    return Resp(200, b)
-            return Resp(404)
-
     live = LiveSource(cfg.staging_dir, "https://example.invalid/synoptic", 30, 5)
-    live.session = Session()
+    live.session = FakeSession({f"https://example.invalid/synoptic/mostrecent/AIAsynoptic{w:04d}.fits": b
+                                for w, b in blobs.items()})
     assert live.refresh(slot + dt.timedelta(minutes=1)) == 4
     assert live.paths(slot) is not None and live.last_download is not None
     assert live.refresh(slot + dt.timedelta(minutes=2)) == 0     # same images: nothing new
@@ -244,21 +232,9 @@ def test_mostrecent_off_slot_fills_both_slots(cfg, tmp_path):
         write_fits(p, w, t)
         blobs[w] = p.read_bytes()
 
-    class Resp:
-        def __init__(self, code, content=b""):
-            self.status_code, self.content = code, content
-
-    class Session:
-        headers = {}
-
-        def get(self, url, timeout=None):
-            for w, b in blobs.items():
-                if url.endswith(f"/mostrecent/AIAsynoptic{w:04d}.fits"):
-                    return Resp(200, b)
-            return Resp(404)
-
     live = LiveSource(cfg.staging_dir, "https://example.invalid/synoptic", 10, 5)
-    live.session = Session()
+    live.session = FakeSession({f"https://example.invalid/synoptic/mostrecent/AIAsynoptic{w:04d}.fits": b
+                                for w, b in blobs.items()})
     assert live.refresh(T0 + dt.timedelta(minutes=5)) == 4
     assert live.paths(T0) is not None and live.paths(T0 + CADENCE) is not None
 

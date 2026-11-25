@@ -4,11 +4,18 @@ append-only, so a crash never leaves a half-written file the API would serve.
 - ``results/YYYYMMDD.jsonl``: one line per processed slot, every status
   (``ok``, ``qc_reject``, ``missing``, ``no_baseline``). This is the
   producer's permanent record and the source for curation and validation.
+  Since 1.3.1 a slot can have more than one line: ``python -m
+  flare_nrt.reprocess`` appends a new row (``reprocessed: true``) after the
+  one it supersedes, and **the last line of a slot in the file is its
+  result**. ``read_day`` returns that one per slot, in slot order; every
+  reader (API, curation, validation, replays) goes through it.
 - ``events.csv``: one row per closed event. Appended by the loop; since
   1.3.0 an empty ``location`` can be filled in once by a replay build
   (``fill_event_location``), under the same lock (``events.csv.lock``).
 - ``state/status.json``: the latest result, read by the API on each request.
 - ``state/loop_state.json``: what a restart needs (last slot, open event).
+- ``state/event_ids.json`` (1.3.1): the last event id handed out, shared by
+  the loop and the reprocess command under the events lock.
 """
 
 from __future__ import annotations
@@ -62,18 +69,22 @@ class ResultStore:
                 except (json.JSONDecodeError, KeyError):
                     continue
 
-    def append(self, row: dict) -> bool:
-        """Appends unless that slot is already recorded (restart safety)."""
+    def append(self, row: dict, supersede: bool = False) -> bool:
+        """Appends unless that slot is already recorded (restart safety);
+        ``supersede``: appends anyway, the new row replaces the old one for
+        every reader (``read_day``)."""
         day = day_key(parse_iso(row["slot"]))
         self._load_seen(day)
-        if row["slot"] in self._seen:
+        if row["slot"] in self._seen and not supersede:
             return False
         with open(self.path(day), "a") as f:
             f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
         self._seen.add(row["slot"])
         return True
 
-    def read_day(self, day: str) -> list[dict]:
+    def read_day(self, day: str, every_row: bool = False) -> list[dict]:
+        """The day's result of each slot (its last row in the file), in slot
+        order; ``every_row``: every line as written, superseded ones too."""
         p = self.path(day)
         if not p.exists():
             return []
@@ -83,7 +94,10 @@ class ResultStore:
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
                 continue
-        return rows
+        if every_row:
+            return rows
+        latest = {r.get("slot"): r for r in rows}      # a later row of a slot replaces the earlier one
+        return sorted(latest.values(), key=lambda r: r.get("slot") or "")
 
 
 @contextlib.contextmanager
@@ -110,6 +124,21 @@ def append_event(path: Path, ev: Event) -> None:
             row = {k: getattr(ev, k) for k in EVENT_FIELDS}
             row["location"] = json.dumps(ev.location) if ev.location else ""
             w.writerow(row)
+
+
+def claim_event_id(path: Path, ids_path: Path, proposed: int) -> int:
+    """The id of a new event (1.3.1): ``proposed`` (the tracker's next id)
+    unless the loop or the reprocess command, each with its own tracker,
+    already handed it out; then the next free one. Kept in ``ids_path``,
+    under the lock of ``events.csv`` (``path``), whose ids it also checks."""
+    with _events_lock(path):
+        last = int((read_json(ids_path, {}) or {}).get("last_id", 0))
+        if Path(path).exists():
+            with open(path, newline="") as f:
+                last = max([last, *(int(r["event_id"]) for r in csv.DictReader(f) if r.get("event_id"))])
+        new = max(int(proposed), last + 1)
+        write_json_atomic(ids_path, {"last_id": new})
+        return new
 
 
 def fill_event_location(path: Path, event_id: int, t_start: str, location: dict | None) -> bool:

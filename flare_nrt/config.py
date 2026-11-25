@@ -45,7 +45,20 @@ class Settings:
     # a slot still missing this long after a later slot has arrived is skipped
     skip_after_min: int = field(default_factory=lambda: int(_env("SKIP_AFTER_MIN", "12")))
     http_timeout: float = field(default_factory=lambda: float(_env("HTTP_TIMEOUT", "15")))
+    # 1.3.1: one download (headers + body) may take at most this long; requests'
+    # timeout only bounds each read, so a trickling answer could hang the loop
+    download_max_sec: float = field(default_factory=lambda: float(_env("DOWNLOAD_MAX_SEC", "60")))
     torch_threads: int = field(default_factory=lambda: int(_env("TORCH_THREADS", "2")))
+
+    # quality control (1.3.1): QUALITY bits that do not reject a frame. Default
+    # 0x40000004 = bit 30 (near-real-time, on every NRT frame) + bit 2 (Q_NOASD,
+    # "ancillary science data not available", on every NRT frame since
+    # 2026-11-24 23:00 UT; synoptic frames come centred and de-rotated anyway).
+    # Hex or decimal. Every other bit still rejects (qc.py)
+    qc_ignore_quality_mask: int = field(default_factory=lambda: int(_env("QC_IGNORE_QUALITY_MASK", "0x40000004"), 0))
+    # 1.3.1: this many slots in a row without a result (15 = 30 min) log a WARNING,
+    # then one every hour while it lasts, and an INFO when results resume
+    no_result_warn_slots: int = field(default_factory=lambda: int(_env("NO_RESULT_WARN_SLOTS", "15")))
 
     # freshness (the portal's manifest uses stale_after: 10m). A frame whose
     # newest T_OBS is older than max_input_age_sec when processed is skipped

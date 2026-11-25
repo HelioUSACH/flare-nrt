@@ -11,7 +11,11 @@ The only differences, all asked for in 1.1.0:
   not exist yet keeps max-age 3600;
 - ``/api/events`` rows gain ``replay``;
 - ``model_version`` says the current version (1.2.0 adds nothing to
-  these endpoints)."""
+  these endpoints);
+- 1.3.1 adds fields to ``/api/status``, which say how long the loop has
+  gone without a result (``last_ok_slot``, ``rejected_streak``, …,
+  ``heartbeat``, ``last_download``). The rows' new ``quality`` and
+  ``quality_soft`` are in the data both servers read, so they match."""
 
 import datetime as dt
 import io
@@ -30,6 +34,8 @@ from flare_nrt.grid import CADENCE, CHANNELS, iso
 
 ROOT = Path(__file__).resolve().parents[1]
 VOLATILE = {"server_time", "seconds_since_update", "input_age_s", "model_version", "disk_free_gb"}
+STATUS_ADDED_131 = {"last_ok_slot", "rejected_streak", "rejected_since", "rejected_streak_reasons",
+                    "last_reject_reasons", "heartbeat", "last_download"}
 IMMUTABLE = "public, max-age=31536000, immutable"
 
 
@@ -109,7 +115,11 @@ def test_v100_endpoints_unchanged(cfg, v100, monkeypatch, tmp_path):
         ra, rb = a.get(u), b.get(u)
         assert ra.status_code == rb.status_code, u
         assert ra.headers["content-type"] == rb.headers["content-type"], u
-        assert _strip(ra.json()) == _strip(rb.json()), u
+        new_json = rb.json()
+        if u == "/api/status":
+            assert STATUS_ADDED_131 <= set(new_json), u
+            new_json = {k: v for k, v in new_json.items() if k not in STATUS_ADDED_131}
+        assert _strip(ra.json()) == _strip(new_json), u
     assert all("replay" in e for e in b.get("/api/events").json()["events"])
     assert a.get("/viewer").text == b.get("/viewer").text
 

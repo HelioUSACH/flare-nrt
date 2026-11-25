@@ -6,9 +6,9 @@
 | Kind | event (detection) |
 | Target (forecasts) | n/a |
 | Owner(s) | Nicolás Campos (HelioUSACH); supervisor and deployment: Víctor A. Pinto |
-| Repo, current tag | `HelioUSACH/flare-nrt`, `v1.3.0` (Python package `flare_nrt`). This sheet is updated with every release |
+| Repo, current tag | `HelioUSACH/flare-nrt`, `v1.3.1` (Python package `flare_nrt`). This sheet is updated with every release |
 | Run cadence | One result per AIA synoptic slot (2 min), as soon as its 4 channels and at least 2 of its 3 baseline frames are on disk |
-| Inputs | **AIA synoptic 131/171/304/1600 Å**, 1024², level 1.5 quicklook. Source: `https://jsoc1.stanford.edu/data/aia/synoptic/mostrecent/AIAsynoptic{0131,0171,0304,1600}.fits`, polled every 30 s. Gaps are filled from the dated archive (`…/synoptic/YYYY/MM/DD/HHH00/`), which lags real time; it is queried at most every 10 min. Typical latency from T_OBS to availability: ~7–10 min (measured on 2026-10-28; `data_latency_s` in every result). Public (NASA/SDO). ≈ 2.75 GB/day. **GOES flare list** (labels for curation and validation only, daily): `https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json`, public domain, < 50 kB/day |
+| Inputs | **AIA synoptic 131/171/304/1600 Å**, 1024², level 1.5 quicklook. Source: `https://jsoc1.stanford.edu/data/aia/synoptic/mostrecent/AIAsynoptic{0131,0171,0304,1600}.fits`, polled every 30 s. Gaps are filled from JSOC's near-real-time archive (`…/synoptic/nrt/YYYY/MM/DD/HHH00/`, current to ~20 min, 3-min cadence; since 1.3.1), or, for an hour it lacks, from the dated archive (`…/synoptic/YYYY/MM/DD/HHH00/`), which lags real time by weeks; queried at most every 10 min. Frames whose header QUALITY has a bit other than 30 (near-real-time) and 2 (`Q_NOASD`, on every near-real-time frame since 2026-11-24 23:00 UT; ignored since 1.3.1) are rejected (`FLARE_NRT_QC_IGNORE_QUALITY_MASK`); each result row keeps the raw QUALITY (`quality`, `quality_soft`). Typical latency from T_OBS to availability: ~7–10 min (measured on 2026-10-28; `data_latency_s` in every result). Public (NASA/SDO). ≈ 2.75 GB/day. **GOES flare list** (labels for curation and validation only, daily): `https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json`, public domain, < 50 kB/day |
 | New data the portal must collect | none (the portal already stores GOES XRS, which it compares itself) |
 | Latest-result endpoint | `GET http://127.0.0.1:5050/api/status`; fields below |
 | Freshness | Computed per request. The result is `stale` if the loop heartbeat or the last result is older than `FLARE_NRT_STALE_AFTER_SEC` (600 s, the manifest's `stale_after: 10m`), or if `input_age_s` (now − newest T_OBS of the last result) exceeds `FLARE_NRT_MAX_INPUT_AGE_SEC` (900 s). `stale_reason` says which. In the loop, a frame whose newest T_OBS is already older than 900 s is not run through the model (`last_frame.status = "inputs_old"`) |
@@ -51,8 +51,13 @@ UTC with `Z`.
 | `last_frame` | object | | the newest slot the loop looked at, whether or not it produced a result: `slot`, `made_at`, `status` (`ok` / `missing` / `qc_reject` / `no_baseline` / `inputs_old`), `reason`, `qc` (QC reasons), `channels_missing`, `baseline_missing`, `input_age_s`, `inputs` |
 | `data_latency_s` | integer | s | processing time − slot time |
 | `latency_ms` | integer | ms | inference time |
-| `model`, `model_version`, `weights_sha256` | string | | `"flare-nrt"`, `"1.3.0"`, the weights' hash. The portal's provenance producer is `flare-nrt@<model_version>` |
+| `model`, `model_version`, `weights_sha256` | string | | `"flare-nrt"`, `"1.3.1"`, the weights' hash. The portal's provenance producer is `flare-nrt@<model_version>` |
 | `frame_count`, `loop_errors`, `loop_last_error`, `loop_last_error_ts` | | | loop health since start |
+| `last_ok_slot` (1.3.1) | ISO `Z` or null | | the newest slot with a result (`ok`) |
+| `rejected_streak` (1.3.1) | integer | slots | slots in a row without a result (any status but `ok`), up to the newest the loop processed; 0 while results flow. 15 (30 min) logs a WARNING, then one every hour |
+| `rejected_since` (1.3.1) | ISO `Z` or null | | the first slot of that run |
+| `rejected_streak_reasons`, `last_reject_reasons` (1.3.1) | object / list | | the run's reason codes counted (e.g. `{"quality:131=1073741828": 15, …}`; QC codes, `missing:<wave>`, `baseline_missing`, `inputs_old`, `error`), and the newest slot's |
+| `heartbeat`, `last_download` (1.3.1) | ISO `Z` or null | | the loop's last pass, and when it last stored a new FITS file (kept across restarts) |
 | `server_time` | ISO `Z` | | |
 
 Not sent: `severity`. It was exploratory in an early internal version and was removed.
@@ -71,7 +76,7 @@ what it shows.
 
 | endpoint | returns |
 |---|---|
-| `GET /api/events?days=30` (1–400) | `{"events": [{event_id, t_start, t_pmax, t_end, p_max, n_alert_frames, location, closed, gradcam, replay}]}`: alert history; `t_start` = first alert, `t_pmax` = highest probability, `t_end` = last alert; `location` (experimental, "Location" below) = the open event's, or, for an event closed without one, its peak frame's once its replay is built (1.3.0; filled once, never changed); `gradcam` = URL of the peak frame's Grad-CAM, or null; `replay` (1.1.0) = whether the event has a replay to show (`/api/events/{event_id}/replay` exists and has at least one frame); the open event last, `closed: false` |
+| `GET /api/events?days=30` (1–400) | `{"events": [{event_id, t_start, t_pmax, t_end, p_max, n_alert_frames, location, closed, gradcam, replay}]}`: alert history; `t_start` = first alert, `t_pmax` = highest probability, `t_end` = last alert; `location` (experimental, "Location" below) = the open event's, or, for an event closed without one, its peak frame's once its replay is built (1.3.0; filled once, never changed); `gradcam` = URL of the peak frame's Grad-CAM, or null; `replay` (1.1.0) = whether the event has a replay to show (`/api/events/{event_id}/replay` exists and has at least one frame); in start order (1.3.1: events of a reprocessed gap are numbered after the loop's, ids are not in time order), the open event last, `closed: false` |
 | `GET /api/series?days=3` (≤ 14) | `{"threshold", "lag_min", "fields": ["slot","probability","state","status"], "points": [[…], …]}`: probability per slot for the time series, oldest first; `probability` null when a slot had no result (`status` says why) |
 | `GET /api/frames?hours=6` (≤ 168) | `{"frames": [{slot, status, state, probability, alert, inputs, images: [waves on disk], gradcam: bool}]}`: recent frames and what can be shown for each |
 | `GET /api/image/{131,171,304,1600}.png?kind=img\|diff&slot=ISO&format=png\|webp&size=512\|1024` | North up: `img` = DN/s with per-channel limits and stretch (131/171/304 asinh to the 99.7th percentile; 1600 linear to the 99.9th, since 1.1.0), SDO-style colours; `diff` = current − mean of the baselines used, grey ±. Without `slot`: the latest result. `format` (1.1.0): `png` (default) or `webp` (quality 90). `size` (1.1.0): 512 (default) or 1024, 1024 for `kind=img` only (rendered from the 1024² FITS); else 422. Available while the FITS are kept (4 days). Header `X-Observation-Time` |
@@ -299,7 +304,7 @@ is listed under `missing`):
               "peak": [], "location": []},
   "note": "1 of 55 slots have no 131 Å image; 1 of 55 slots have no 171 Å image: their files were gone or never made (…)",
   "built_at": "2026-07-07T18:00:00Z",
-  "model_version": "1.3.0"
+  "model_version": "1.3.1"
 }
 ```
 
@@ -364,7 +369,12 @@ peak's Grad-CAM, kept 400 days for alerting frames, is added either way.
 ## Stored per frame
 
 - **Results:** `results/YYYYMMDD.jsonl` holds one row per slot, with every
-  field above plus `aia131_excess`, the input of the baseline rule.
+  field above plus `aia131_excess`, the input of the baseline rule, and
+  (1.3.1) `quality` (raw header QUALITY per channel) and `quality_soft`
+  (ignored flags present, e.g. `["noasd"]`). A slot reprocessed by `python
+  -m flare_nrt.reprocess` (1.3.1) has a second row, `reprocessed: true`,
+  after the first: **the last row of a slot is its result**. Every
+  endpoint reads it that way; a reader of the files must too.
 - **Model inputs:** `tensors/YYYYMMDD/HHMM.npz` holds the exact
   (8, 512, 512) float16 input, kept 2 days.
 - **Raw files:** the raw FITS stay in `staging/` for 4 days.
@@ -383,7 +393,7 @@ the layout and the install:
 
 | unit | what | limits |
 |---|---|---|
-| `flare-nrt-loop.service` | the loop | `MemoryMax=3G`, `CPUQuota=200%` |
+| `flare-nrt-loop.service` | the loop; `Type=notify`, `WatchdogSec=600` (1.3.1) | `MemoryMax=3G`, `CPUQuota=200%` |
 | `flare-nrt-api.service` | uvicorn on 127.0.0.1:5050; writes only `cache/` | `MemoryMax=512M`, `CPUQuota=100%` |
 | `flare-nrt-curate.{service,timer}` | 04:20 UT daily | `MemoryMax=1G`, `CPUQuota=100%` |
 | `flare-nrt-validate.{service,timer}` | Mondays 05:00 UT | `MemoryMax=1G`, `CPUQuota=100%` |

@@ -5,10 +5,19 @@ so the archive records why a slot is missing.
 Rules (a slot is rejected if any channel fails):
 
 - ``unreadable``: FITS can't be opened or has no 2-D image.
-- ``quality``: header QUALITY != 0 (e.g. the daily 21:00 UT synoptic frame,
-  QUALITY=65536, or the July 2026 spacecraft flags, QUALITY=2097152). Bit 30
-  (0x40000000, "quicklook") is ignored: every near-real-time image carries it
-  (JSOC ``mostrecent/``), the archived ones used for validation don't.
+- ``quality``: header QUALITY has a bit outside the ignored mask (e.g. the
+  daily 21:00 UT synoptic frame, QUALITY=65536, or the July 2026 spacecraft
+  flags, QUALITY=2097152). Ignored by default (``FLARE_NRT_QC_IGNORE_QUALITY_MASK``,
+  0x40000004): bit 30 (0x40000000, near-real-time/"quicklook"), which every
+  near-real-time image carries (JSOC ``mostrecent/``, ``nrt/``) and the
+  archived ones used for validation don't; and, since 1.3.1, bit 2
+  (0x04, ``Q_NOASD``, "ancillary science data not available or error", JSOC
+  ``proj/lev0/apps/quallev1.h``), set on every near-real-time frame since
+  2026-11-24 23:00 UT. Synoptic frames arrive centred and de-rotated
+  (CRPIX = 512.5, CROTA2 = 0) with or without it, and nothing here reads the
+  pointing keywords it concerns. The raw QUALITY of each channel and the
+  ignored flags present (``quality_soft``, e.g. ``["noasd"]``) are kept in
+  every result row.
 - ``exptime``: EXPTIME <= 0.
 - ``wavelength``: WAVELNTH doesn't match the file's channel.
 - ``nonfinite``: more than 1 % of pixels NaN/inf.
@@ -37,6 +46,10 @@ from .grid import iso_ms, parse_datetime
 
 MAX_NONFINITE = 0.01
 QUICKLOOK_BIT = 1 << 30  # set on all near-real-time AIA frames
+NOASD_BIT = 1 << 2  # Q_NOASD: ancillary science data missing (all NRT frames since 2026-11-24 23:00 UT)
+DEFAULT_IGNORE_MASK = QUICKLOOK_BIT | NOASD_BIT
+# names of the ignored bits in ``quality_soft``; bit 30 is on every NRT frame, so it isn't listed
+SOFT_FLAG_NAMES = {NOASD_BIT: "noasd"}
 MAX_TIME_OFFSET_S = 90
 MAX_CHANNEL_SPREAD_S = 120
 MEDIAN_RATIO = (0.25, 4.0)
@@ -54,6 +67,14 @@ class SlotQC:
     reasons: list[str] = field(default_factory=list)
     frames: dict[int, Frame] = field(default_factory=dict)
     t_obs: dict[int, str] = field(default_factory=dict)
+    quality: dict[int, int] = field(default_factory=dict)   # raw QUALITY per channel read
+    quality_soft: list[str] = field(default_factory=list)   # ignored flags present, any channel
+
+
+def soft_flags(quality: int, ignore_mask: int) -> list[str]:
+    """Names of the ignored QUALITY bits set in ``quality`` (bit 30 left out)."""
+    bits = quality & ignore_mask & ~QUICKLOOK_BIT
+    return [SOFT_FLAG_NAMES.get(1 << b, f"bit{b}") for b in range(32) if bits >> b & 1]
 
 
 def _header_time(h) -> dt.datetime | None:
@@ -96,14 +117,16 @@ def disk_median(data: np.ndarray, header: dict) -> float:
 
 
 class QualityControl:
-    def __init__(self, history: int = 30):
+    def __init__(self, history: int = 30, ignore_mask: int = DEFAULT_IGNORE_MASK):
         self.ref: dict[int, deque] = {}
         self.history = history
+        self.ignore_mask = ignore_mask
 
     def check_slot(self, slot: dt.datetime, paths: dict[int, Path]) -> SlotQC:
         res = SlotQC(ok=True)
         times = []
         medians = {}
+        soft: set[str] = set()
         for wave, path in sorted(paths.items()):
             try:
                 fr = read_frame(path)
@@ -115,7 +138,9 @@ class QualityControl:
                 res.reasons.append(f"unreadable:{wave}")
                 continue
             qual = int(h.get("QUALITY", 0) or 0)
-            if qual & ~QUICKLOOK_BIT:
+            res.quality[wave] = qual
+            soft.update(soft_flags(qual, self.ignore_mask))
+            if qual & ~self.ignore_mask:
                 res.reasons.append(f"quality:{wave}={qual}")
             if float(h.get("EXPTIME", 1) or 0) <= 0:
                 res.reasons.append(f"exptime:{wave}")
@@ -145,6 +170,7 @@ class QualityControl:
             res.frames[wave] = fr
         if len(times) >= 2 and (max(times) - min(times)).total_seconds() > MAX_CHANNEL_SPREAD_S:
             res.reasons.append("channel_spread")
+        res.quality_soft = sorted(soft)
         res.ok = not res.reasons and len(res.frames) == len(paths)
         if res.ok:
             for wave, med in medians.items():
