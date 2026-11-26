@@ -147,6 +147,7 @@ class GradcamRecompute:
         self.cfg, self.ens, self.loc = cfg, ensemble, locator
         self.v_high = load_norm_stats(cfg.norm_stats)
         self.n = 0          # maps recomputed (reported by the command)
+        self.tick = None    # called after each map (the loop's systemd watchdog, 1.3.1)
 
     def _current(self, slot: dt.datetime):
         from .preprocess import build_current
@@ -182,6 +183,8 @@ class GradcamRecompute:
                 x = build_input(cur, bls)
             cam = self.ens.gradcam(x).numpy()
             self.n += 1
+            if self.tick:
+                self.tick()
         except Exception:
             log.exception("Grad-CAM recompute for %s failed", iso(slot))
             return None
@@ -472,13 +475,16 @@ class ReplayBuilder:
     """Called by the live loop after each poll; checks at most every
     ``every_sec`` and never raises."""
 
-    def __init__(self, cfg, ensemble=None, every_sec: int = 300):
+    def __init__(self, cfg, ensemble=None, every_sec: int = 300, tick=None):
         self.cfg = cfg
         self.every = every_sec
         self._last = 0.0
+        self.tick = tick    # 1.3.1: called after each replay and each recomputed map (systemd watchdog)
         self.locator = FitsLocator(cfg)
         # 1.3.0: with the loop's model, a frame without a stored map gets one (backlog slots)
         self.gradcam = GradcamRecompute(cfg, ensemble, self.locator) if ensemble is not None else None
+        if self.gradcam:
+            self.gradcam.tick = tick
 
     def maybe_run(self, now: dt.datetime, last_slot: dt.datetime | None) -> list[int]:
         if time.time() - self._last < self.every:
@@ -489,6 +495,8 @@ class ReplayBuilder:
             for ev in pending(self.cfg, now, last_slot):
                 build(self.cfg, ev, now, self.locator, self.gradcam)
                 built.append(int(ev["event_id"]))
+                if self.tick:
+                    self.tick()
         except Exception:
             log.exception("building event replays failed")
         return built

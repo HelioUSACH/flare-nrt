@@ -78,3 +78,44 @@ def cfg(tmp_path, stand_in_weights, norm_stats):
     c.min_free_gb = 0  # the disk guard is tested on its own, never by accident
     c.ensure_dirs()
     return c
+
+
+class FakeResponse:
+    """What ``LiveSource.get`` reads of a ``requests`` response."""
+
+    def __init__(self, status, body=b"", chunk_delay=0.0):
+        self.status_code, self.body, self.chunk_delay = status, body, chunk_delay
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_content(self, size):
+        import time
+
+        for i in range(0, len(self.body), size):
+            if self.chunk_delay:
+                time.sleep(self.chunk_delay)
+            yield self.body[i:i + size]
+
+
+class FakeSession:
+    """A ``requests.Session`` stand-in: ``answers`` maps a URL to bytes
+    (200) or an HTTP status; anything else is 404. ``calls`` lists the URLs
+    asked for, in order."""
+
+    headers: dict = {}
+
+    def __init__(self, answers=None, chunk_delay=0.0):
+        self.answers = dict(answers or {})
+        self.calls: list[str] = []
+        self.chunk_delay = chunk_delay
+
+    def get(self, url, timeout=None, stream=False):
+        self.calls.append(url)
+        v = self.answers.get(url, 404)
+        if isinstance(v, int):
+            return FakeResponse(v)
+        return FakeResponse(200, v, self.chunk_delay)

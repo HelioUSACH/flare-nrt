@@ -60,6 +60,7 @@ python -m flare_nrt.loop --replay /path/to/fits             # replay stored FITS
 python -m flare_nrt.goes --start 2026-06-19 --end 2026-07-17 --out flares.csv   # GOES list of a past period
 python -m flare_nrt.replays                                 # one-off: replays missing, incomplete or from before 1.3.0
 python -m flare_nrt.replays --fits-root /path/keep           # … with more FITS laid out like staging/ (keep/YYYYMMDD/)
+python -m flare_nrt.reprocess --since 2026-11-24T23:00:00Z  # one-off: rerun slots without a result whose FITS are in staging
 ```
 
 On the server, run the one-off as the service user under the units'
@@ -111,7 +112,8 @@ flare_nrt/  config, grid (2-min slots), source (JSOC), qc, preprocess,
            events), loop, artifacts (tensors, Grad-CAM), localize, render
            (images, Grad-CAM heat style), display (render/ per result),
            replays (event replays), server (HTTP), store, retention,
-           curate, goes, validate, fetch_weights
+           curate, goes, validate, fetch_weights, streak (warns when
+           results stop), sdnotify (systemd watchdog), reprocess
 deploy/    systemd units and the deployment note
 docs/      model card, archive format
 tests/     offline tests; fixtures/ holds one real model input

@@ -7,7 +7,12 @@ process every slot in order, exactly once.
 Per slot: QC → preprocess → baseline from t−L…(n_baseline frames) → ensemble
 → alert rule → event merging → results/YYYYMMDD.jsonl (+ status.json for
 the API). A slot whose files haven't arrived is waited for up to
-``give_up_min``, then recorded as ``missing``."""
+``give_up_min``, then recorded as ``missing``.
+
+Since 1.3.1 the loop says when it stops producing results
+(``flare_nrt/streak.py``: a WARNING after 30 min without one, then hourly,
+an INFO when results resume) and tells systemd it is alive
+(``flare_nrt/sdnotify.py``, ``Type=notify`` + ``WatchdogSec``)."""
 
 from __future__ import annotations
 
@@ -33,8 +38,10 @@ from .preprocess import build_current, build_input, load_norm_stats
 from .qc import QualityControl
 from .replays import ReplayBuilder
 from .retention import Retention
+from .sdnotify import notify
 from .source import LiveSource, ReplaySource
-from .store import ResultStore, append_event, read_json, write_json_atomic
+from .store import ResultStore, append_event, claim_event_id, read_json, write_json_atomic
+from .streak import NoResultWatch
 
 log = logging.getLogger("flare_nrt.loop")
 
@@ -93,21 +100,28 @@ def signal_state(opened: bool, alert: bool, is_open: bool) -> str:
 
 class Processor:
     """Everything that turns one slot into one result row. No timing, no
-    network: the loop (or a test) feeds it slots in order."""
+    network: the loop (or a test) feeds it slots in order.
 
-    def __init__(self, cfg: Settings, ensemble: Ensemble, source, live: bool):
+    ``keep_state=False`` (the reprocess command, 1.3.1): rows and events
+    only; the live loop's state files (``loop_state.json``,
+    ``last_frame.json``, ``status.json``, ``no_result.json``) are left alone."""
+
+    def __init__(self, cfg: Settings, ensemble: Ensemble, source, live: bool, keep_state: bool = True):
         self.cfg = cfg
         self.ens = ensemble
         self.src = source
         self.live = live
+        self.keep_state = keep_state
+        self.supersede = False       # reprocess: a new row replaces the slot's old one
         self.v_high = load_norm_stats(cfg.norm_stats)
-        self.qc = QualityControl()
+        self.qc = QualityControl(ignore_mask=cfg.qc_ignore_quality_mask)
         keep = dt.timedelta(minutes=cfg.lag_min) + (cfg.n_baseline + 2) * CADENCE
         self.buf = FrameBuffer(keep)
         self.qc_reasons: dict = {}
         self.headers: dict = {}
         self.inputs: dict = {}
         self.rate131: dict = {}
+        self.quality: dict = {}      # slot → (raw QUALITY per channel, ignored flags present)
         st = read_json(cfg.loop_state_path, {}) or {}
         self.tracker = EventTracker(cfg.merge_gap_min, st.get("last_id", 0), st.get("current"))
         self.results = ResultStore(cfg.results_dir)
@@ -118,6 +132,9 @@ class Processor:
         self.render = live
         self.errors = 0
         self.last_error: tuple[str, str] | None = None
+        # 1.3.1: says when results stop (live loop only)
+        self.watch = NoResultWatch(cfg.state_dir / "no_result.json", cfg.no_result_warn_slots) \
+            if live and keep_state else None
 
     # -- frames -------------------------------------------------------------
     def current(self, slot: dt.datetime):
@@ -128,6 +145,7 @@ class Processor:
         if paths is None:
             return MISSING
         q = self.qc.check_slot(slot, paths)
+        self.quality[slot] = ({str(w): v for w, v in sorted(q.quality.items())}, q.quality_soft)
         if not q.ok:
             self.qc_reasons[slot] = q.reasons
             self.buf.put(slot, None)
@@ -137,7 +155,7 @@ class Processor:
         self.inputs[slot] = q.t_obs
         self.rate131[slot] = rate_map(q.frames[131].data, q.frames[131].header)
         self.buf.put(slot, t)
-        for d in (self.headers, self.inputs, self.qc_reasons, self.rate131):
+        for d in (self.headers, self.inputs, self.qc_reasons, self.rate131, self.quality):
             for s in [s for s in d if s not in self.buf]:
                 del d[s]
         return t
@@ -150,6 +168,8 @@ class Processor:
         cur = self.current(slot)
         alert = False
         prob = None
+        if cur is not MISSING and slot in self.quality:
+            row["quality"], row["quality_soft"] = self.quality[slot]
         if cur is MISSING:
             row.update(status="missing", reason="channels_missing",
                        channels_missing=self.src.missing_channels(slot))
@@ -194,6 +214,8 @@ class Processor:
                     write_result_renders(cfg, slot, p171, [(self.src.paths(s) or {}).get(171) for s in used], cam)
         ev_id, opened, closed = self.tracker.update(slot, alert, prob or 0.0,
                                                     event_location(row.get("location"), self.tracker, slot))
+        if opened:
+            ev_id = self._claim_event_id(ev_id)
         if closed:
             append_event(cfg.events_path, closed)
             log.info("event %d closed: %s → %s, p_max %.3f", closed.event_id, closed.t_start,
@@ -202,15 +224,30 @@ class Processor:
             log.info("event %d opened at %s (p=%.3f)", ev_id, iso(slot), prob)
         row["state"] = signal_state(opened, alert, self.tracker.current is not None)
         row["event_id"] = ev_id
-        self.results.append(row)
+        if self.supersede:
+            row["reprocessed"] = True
+        self.results.append(row, supersede=self.supersede)
+        if not self.keep_state:
+            return row
         write_json_atomic(cfg.loop_state_path, {"last_slot": iso(slot), **self.tracker.state()})
         write_json_atomic(cfg.state_dir / "last_frame.json",
                           {k: row.get(k) for k in ("slot", "made_at", "status", "reason", "qc",
                                                    "channels_missing", "baseline_missing",
-                                                   "input_age_s", "inputs")})
+                                                   "input_age_s", "inputs", "quality", "quality_soft")})
         if row["status"] == "ok":
             self._write_status(row)
+        if self.watch:
+            self.watch.update(row)
         return row
+
+    def _claim_event_id(self, proposed: int) -> int:
+        """1.3.1: the loop and the reprocess command each have a tracker;
+        a new event takes the next id neither has handed out."""
+        new = claim_event_id(self.cfg.events_path, self.cfg.state_dir / "event_ids.json", proposed)
+        if new != proposed:
+            self.tracker.current.event_id = new
+            self.tracker.last_id = new
+        return new
 
     def _rate(self, slot: dt.datetime):
         """131 Å DN/s of a slot: kept from preprocessing, else read from its
@@ -281,7 +318,8 @@ class Processor:
         ev = self.tracker.close()
         if ev:
             append_event(self.cfg.events_path, ev)
-        write_json_atomic(self.cfg.loop_state_path, {"last_slot": None, **self.tracker.state()})
+        if self.keep_state:
+            write_json_atomic(self.cfg.loop_state_path, {"last_slot": None, **self.tracker.state()})
 
 
 def should_skip(src, slot: dt.datetime, now: dt.datetime, cfg: Settings,
@@ -310,7 +348,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
     ens = Ensemble.load(cfg.weights, cfg.weights_sha256)
     live = replay_dir is None
     src = LiveSource(cfg.staging_dir, cfg.jsoc_base, cfg.lookback_min, cfg.http_timeout,
-                     cfg.archive_every_sec, cfg.archive_budget_sec) if live \
+                     cfg.archive_every_sec, cfg.archive_budget_sec, cfg.download_max_sec) if live \
         else ReplaySource(replay_dir)
     proc = Processor(cfg, ens, src, live)
     log.info("flare-nrt %s | L=%d min, n_bl=%d, thr=%.2f, merge=%d min | %s | weights %s",
@@ -339,9 +377,18 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
         return proc
 
     retention = Retention(cfg, every_sec=600 if cfg.staging_hours > 0 else 3600)
-    replays = ReplayBuilder(cfg, ens)   # 1.3.0: the loaded model fills missing Grad-CAM maps
+    def alive() -> None:                   # progress → systemd's watchdog (1.3.1)
+        notify("WATCHDOG=1")
+
+    replays = ReplayBuilder(cfg, ens, tick=alive)   # 1.3.0: the loaded model fills missing Grad-CAM maps
     st = read_json(cfg.loop_state_path, {}) or {}
     now = started = utcnow()
+    hb = read_json(cfg.state_dir / "heartbeat.json", {}) or {}
+    if hb.get("last_download"):          # 1.3.1: survives a restart
+        src.last_download = parse_iso(hb["last_download"])
+    proc.watch.bootstrap(proc.results, (read_json(cfg.status_path, {}) or {}).get("observation_time"), now)
+    proc.watch.announce()
+    notify("READY=1")
     nxt = floor_slot(now - dt.timedelta(minutes=20))
     if st.get("last_slot"):
         prev = parse_iso(st["last_slot"])
@@ -352,6 +399,7 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
         it += 1
         now = utcnow()
         src.refresh(now)
+        alive()
         last_fetch = time.monotonic()
         while nxt <= floor_slot(now):
             if src.paths(nxt) is None and not should_skip(src, nxt, now, cfg, started):
@@ -371,14 +419,18 @@ def run(cfg: Settings, replay_dir=None, max_iterations: int | None = None,
                 proc.errors += 1
                 proc.last_error = (iso(utcnow()), f"{type(e).__name__}: {e}")
                 log.exception("slot %s failed", iso(nxt))
-                proc.results.append({"slot": iso(nxt), "made_at": iso(utcnow()), "status": "error",
-                                     "error": proc.last_error[1], "model_version": __version__})
+                err = {"slot": iso(nxt), "made_at": iso(utcnow()), "status": "error",
+                       "error": proc.last_error[1], "model_version": __version__}
+                proc.results.append(err)
+                proc.watch.update(err)
+            alive()
             nxt += CADENCE
         write_json_atomic(cfg.state_dir / "heartbeat.json",
                           {"heartbeat": iso(utcnow()), "next_slot": iso(nxt),
                            "last_download": iso(src.last_download)})
         replays.maybe_run(utcnow(), nxt - CADENCE)
         retention.maybe_run()
+        alive()
         if max_iterations is None or it < max_iterations:
             time.sleep(cfg.poll_sec)
     return proc

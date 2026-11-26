@@ -18,7 +18,12 @@ request:
 
 ``last_frame`` says what happened to the newest slot the loop looked at, so a
 skipped frame explains itself (``missing`` / ``qc_reject`` /
-``no_baseline`` / ``inputs_old``).
+``no_baseline`` / ``inputs_old``). Since 1.3.1 ``last_ok_slot``,
+``rejected_streak`` (slots in a row without a result), ``rejected_since``,
+``rejected_streak_reasons``, ``last_reject_reasons`` (``state/no_result.json``),
+``heartbeat`` and ``last_download`` (``state/heartbeat.json``) say how long
+the loop has gone without a result and why, while ``status.json`` (written
+with each result) stays as it was.
 
 The API only reads the data directory, except ``cache/`` where it keeps the
 PNG previews it renders."""
@@ -119,6 +124,7 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         now = utcnow()
         st = read_json(cfg.status_path)
         hb = read_json(cfg.state_dir / "heartbeat.json")
+        nr = read_json(cfg.state_dir / "no_result.json") or {}
         ls, reason, since = live_status(st, hb, now, cfg.stale_after_sec, cfg.max_input_age_sec)
         out = dict(st or {})
         out.update({
@@ -129,6 +135,14 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
             "stale_after_sec": cfg.stale_after_sec,
             "max_input_age_sec": cfg.max_input_age_sec,
             "last_frame": read_json(cfg.state_dir / "last_frame.json"),
+            # 1.3.1: how long without a result, and why; the loop's heartbeat and newest download
+            "last_ok_slot": nr.get("last_ok_slot") or (st or {}).get("observation_time"),
+            "rejected_streak": nr.get("rejected_streak", 0 if st else None),
+            "rejected_since": nr.get("rejected_since"),
+            "rejected_streak_reasons": nr.get("rejected_streak_reasons") or {},
+            "last_reject_reasons": nr.get("last_reject_reasons") or [],
+            "heartbeat": (hb or {}).get("heartbeat"),
+            "last_download": (hb or {}).get("last_download"),
             "server_time": iso(now),
             "model_version": __version__,
         })
@@ -144,7 +158,9 @@ def create_app(cfg: Settings | None = None) -> FastAPI:
         the peak frame when it is still stored. ``start``/``end`` (ISO)
         select any window instead of the last ``days``."""
         since, until = _window(start, end, days, 400)
-        evs = [e for e in read_events(cfg.events_path) if since <= parse_iso(e["t_start"]) <= until]
+        # in start order: events of a reprocessed gap are appended later (1.3.1)
+        evs = sorted((e for e in read_events(cfg.events_path) if since <= parse_iso(e["t_start"]) <= until),
+                     key=lambda e: parse_iso(e["t_start"]))
         st = read_json(cfg.loop_state_path, {}) or {}
         cur = st.get("current")
         if cur and since <= parse_iso(cur["t_start"]) <= until:

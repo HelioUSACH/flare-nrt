@@ -1,5 +1,110 @@
 # Changelog
 
+## 1.3.1
+
+After the outage of 2026-11-24/25: no result from 22:58 UT on 2026-11-24
+until this release, and nothing said why. **The network is unchanged**:
+same weights (same two release files, same SHA-256), same normalisation,
+threshold, baselines, state machine and alert rule
+(`tests/test_snapshot.py` passes unchanged; `flare_nrt/model.py`,
+`preprocess.py`, `detector.py`, `localize.py` and `tests/fixtures/snapshot_*`
+are byte-identical to `v1.3.0`). **What changes is which frames are
+processed** (item 1): frames flagged `Q_NOASD` were rejected by 1.0.0–1.3.0,
+including the v1.0.0 the paper describes, and are processed now.
+
+**The outage.** From the 23:00 UT image of 2026-11-24, JSOC's
+near-real-time synoptic AIA images carry `QUALITY = 0x40000004` (was
+`0x40000000`): bit 30, near-real-time, which QC always ignored, plus bit 2,
+`Q_NOASD`, "ancillary science data not available or error" (JSOC
+`proj/lev0/apps/quallev1.h`), with `ASD_REC` and `SAT_ROT` empty. QC
+rejected any other bit than 30, so every slot since was written
+`qc_reject`, with no log line; the loop kept downloading (newest files on
+time) and advancing (`heartbeat.json`), so nothing looked wrong but the
+missing results. The images are fine: synoptic frames arrive centred and
+de-rotated (`CRPIX1/2 = 512.5`, `CROTA2 = 0`, `CDELT1 = 2.4`) with or
+without the flag, preprocessing reads no pointing keyword, and `localize`
+uses `CRPIX`/`CDELT`/`RSUN_OBS`, all present and normal. Cause external
+(JSOC/SDO); the host, network, disk and memory were fine (the loop sat at
+its 3 GB cap, but `memory.stat` shows 0.59 GB anonymous and 2.47 GB file
+cache: no leak).
+
+1. **Soft quality bits.** QC ignores bits 30 (`0x40000000`) and 2 (`0x04`,
+   `Q_NOASD`); every other bit still rejects (e.g. the daily 21:00 UT frame,
+   `0x40010000`, and the spacecraft flags of July 2026, `0x40200000`).
+   The ignored mask is a setting, `FLARE_NRT_QC_IGNORE_QUALITY_MASK`
+   (default `0x40000004`, hex or decimal; `0x40000000` restores 1.3.0).
+   Every result row (and `last_frame`) records the raw QUALITY of each
+   channel, `quality: {"131": 1073741828, …}`, and the ignored flags
+   present, `quality_soft: ["noasd"]` (bit 30 is on every near-real-time
+   frame and isn't listed), so these frames can be told apart later.
+   Tests with real header values: `0x40000000` and `0x40000004` accepted;
+   `0x40200000`, `0x40010000`, `0x80000000` rejected.
+2. **The loop says when it produces no result.** After 15 slots in a row
+   without a result (30 min; any status but `ok`; setting
+   `FLARE_NRT_NO_RESULT_WARN_SLOTS`) it logs one WARNING with the reason
+   codes counted, e.g. `30 min without a result (since
+   2026-11-24T23:00:00Z, last result 2026-11-24T22:58:00Z):
+   quality:131=1073741828 ×15, …`, then one every hour while it lasts, and
+   one INFO when results resume. It also says so at start, the first time
+   rebuilding the count from `results/`. `/api/status` gains
+   `last_ok_slot`, `rejected_streak`, `rejected_since`,
+   `rejected_streak_reasons`, `last_reject_reasons` (from
+   `state/no_result.json`, written with every slot), `heartbeat` and
+   `last_download` (from `heartbeat.json`; `last_download` now survives a
+   restart instead of coming back `None`). The 1.3.0 fields are unchanged
+   (`status.json` is still written with each result).
+3. **An archive fallback that works.** The fallback used the dated archive
+   (`synoptic/YYYY/MM/DD/HHH00/`), which lags weeks: 404 for the current
+   days, and those answers were marked missed without a log line. It now
+   lists JSOC's near-real-time archive,
+   `synoptic/nrt/YYYY/MM/DD/HHH00/` (current to ~20 min; names carry
+   seconds, `AIA20261124_230000_0131.fits`; **its cadence is 3 min**, so
+   each image is filed under every 2-min slot within 90 s of it, as
+   `mostrecent/` images are: 23:03 fills 23:02 and 23:04), once per hour
+   directory per pass, and downloads what it lists. The dated archive is
+   asked only for an hour `nrt/` doesn't have (old days). Answers other
+   than 200 are counted and logged after the first pass that has any, then
+   at most once an hour: `archive: 16 answer(s) other than 200 since … (503
+   ×16), e.g. HTTP 503 <url>`. Tests with directory listings recorded from
+   JSOC (`tests/fixtures/jsoc_nrt_20261124_H2{2,3}00.html`).
+4. **Hangs.** A requests `timeout` bounds the connection and each read, not
+   a download: every download now also has a total limit
+   (`FLARE_NRT_DOWNLOAD_MAX_SEC`, 60 s). And the loop feeds systemd's
+   watchdog: `flare-nrt-loop.service` is `Type=notify`, `WatchdogSec=600`,
+   `TimeoutStartSec=300`; the loop sends `READY=1` once the model is loaded
+   and `WATCHDOG=1` after each download pass, each slot, each replay and
+   each Grad-CAM map a replay recomputes (`flare_nrt/sdnotify.py`, standard
+   library, no new dependency). **The unit file changes**: copy it
+   (deploy/README.md, "Upgrade from 1.3.0 to 1.3.1").
+5. **Reprocess the gap.** `python -m flare_nrt.reprocess --since ISO
+   [--until ISO] [--dry-run]`, a one-off: slots whose result is
+   `qc_reject`, `missing` or `no_baseline` (or none) and whose FITS are
+   still in staging (4 days) are run again, in order, through the loop's
+   `Processor` (same QC with the new mask, baselines from staging, model,
+   alert rule, event tracker). Each new row is appended after the old one
+   with `reprocessed: true`, and **the last row of a slot in
+   `results/YYYYMMDD.jsonl` is its result**: `ResultStore.read_day`
+   returns that one per slot, in slot order, so `/api/series`,
+   `/api/frames`, `/api/frame`, curation, validation and replays show the
+   new rows; the old rows stay in the file (`read_day(day,
+   every_row=True)`). Events found in the gap are created as usual; their
+   ids come from a counter the loop and the command share
+   (`state/event_ids.json`, under the `events.csv` lock), and it never goes
+   past the newest slot the loop has written, so it can run next to the
+   loop; `/api/events` lists events in start order. It
+   writes Grad-CAM for alerting frames only and leaves the loop's state
+   files alone. For this outage: `--since 2026-11-24T23:00:00Z`, before
+   2026-11-28 ~23:00 UT, when the first of those FITS leave staging.
+
+GOES during the gap: four B-class flares (B2.0–B6.4); nothing of note was
+missed.
+
+Also: version 1.3.1 (`pyproject.toml`, `flare_nrt.__version__`,
+`model_version`, INTEGRATION.md, deploy/README.md with the upgrade steps
+from 1.3.0); `fetch_weights` reads the `v1.3.1` release, which carries the
+same two files as `v1.0.0`–`v1.3.0`; `tests/test_v100_compat.py` allows the
+new `/api/status` fields.
+
 ## 1.3.0
 
 What an event replay shows, and where an event is. **The model is
